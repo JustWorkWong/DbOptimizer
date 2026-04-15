@@ -4,7 +4,8 @@
       "Bash(cp ~/.claude/memory/windows_file_operations.md ~/.claude/skills/troubleshooting/windows-file-ops.md)",
       "Bash(cp ~/.claude/memory/tool_error_prevention.md ~/.claude/skills/troubleshooting/error-prevention.md)",
       "Bash(bash *)",
-      "*"
+      "*",
+      "Bash(git *)"
     ]
   }
 }
