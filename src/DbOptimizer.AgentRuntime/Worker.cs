@@ -1,6 +1,6 @@
 namespace DbOptimizer.AgentRuntime;
 
-public class Worker(ILogger<Worker> logger) : BackgroundService
+public class Worker(ILogger<Worker> logger, RuntimeOptions runtimeOptions) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -8,9 +8,16 @@ public class Worker(ILogger<Worker> logger) : BackgroundService
         {
             if (logger.IsEnabled(LogLevel.Information))
             {
-                logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
+                logger.LogInformation(
+                    "AgentRuntime heartbeat. AI Endpoint={AiEndpoint}, Model={AiModel}, MCP Timeout={McpTimeoutSeconds}s, Workflow Retry={WorkflowRetryCount}, RegenerationMaxRounds={RegenerationMaxRounds}",
+                    runtimeOptions.Ai.Endpoint,
+                    runtimeOptions.Ai.Model,
+                    runtimeOptions.Mcp.TimeoutSeconds,
+                    runtimeOptions.Workflow.MaxRetryCount,
+                    runtimeOptions.Workflow.RegenerationMaxRounds);
             }
-            await Task.Delay(1000, stoppingToken);
+
+            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
         }
     }
 }
