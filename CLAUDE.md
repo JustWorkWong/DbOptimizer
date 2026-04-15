@@ -2,14 +2,18 @@
 
 ## 项目概述
 
-DbOptimizer 是一个基于 Microsoft Agent Framework (MAF) 和 Blazor WebAssembly 的 AI 驱动数据库性能优化平台。
+DbOptimizer 是一个基于 Microsoft Agent Framework (MAF) 的 AI 驱动数据库性能优化平台。
 
 **核心价值**：
 - 展示 MAF 多 Agent 协作能力
 - 透明化 AI 分析过程
 - 提供实用的数据库优化建议
 
-**技术栈**：.NET 10 + MAF + Blazor WebAssembly + PostgreSQL + Redis
+**技术栈**：
+- 后端：.NET 10 + ASP.NET Core + MAF + Aspire (本地编排)
+- 前端：Vue 3 + Element Plus
+- 数据库：PostgreSQL + Redis
+- 支持目标数据库：MySQL 5.7+ / PostgreSQL 13+
 
 ---
 
@@ -18,10 +22,8 @@ DbOptimizer 是一个基于 Microsoft Agent Framework (MAF) 和 Blazor WebAssemb
 ### 1. 约束先行
 
 **所有开发工作必须遵循以下文档**：
-- `docs/superpowers/specs/2026-04-14-dboptimizer-design.md`：需求设计
-- `docs/ARCHITECTURE.md`：架构设计
-- `docs/DATA_MODEL.md`：数据模型
-- `docs/IMPLEMENTATION_PLAN.md`：实现计划
+- `docs/REQUIREMENTS.md`：需求文档（主文档）
+- `docs/DESIGN.md`：设计文档（主文档）
 
 **规则**：
 - 修改架构前，先更新文档
@@ -40,18 +42,24 @@ DbOptimizer 是一个基于 Microsoft Agent Framework (MAF) 和 Blazor WebAssemb
 - 这个设计是否最简单？
 - 这个抽象是否必要？
 
-### 3. YAGNI（You Aren't Gonna Need It）
+### 3. 第一版范围
 
-**不要过度设计**：
-- Phase 1 只实现核心 SQL 分析
-- Phase 2 再加监控和配置优化
-- Phase 3 才考虑 MCP 和 Skills
-- Phase 4 的功能（审批流、告警）可能永远不需要
+**必须实现**：
+- 单项目模式运行
+- Aspire 编排 API / AgentRuntime / Web / PostgreSQL / Redis
+- MySQL & PostgreSQL MCP 同时接入
+- 数据库层调优工作流
+- SQL 调优工作流（手工输入 + 慢 SQL 自动抓取）
+- 人工审核 + 审核驳回后回流重跑
+- Agent 全量持久化 + Workflow checkpoint
+- 置信度 + 原因 + 证据链展示
+- 历史任务与建议版本查看
 
-**判断标准**：
-- 这个功能现在必须要吗？
-- 没有这个功能，系统能运行吗？
-- 这个抽象层现在有 3 个以上的实现吗？
+**第一版不做**：
+- 用户/租户体系
+- 自动执行变更（参数/索引/SQL rewrite）
+- 平台自身对外暴露 MCP Server
+- 复杂 RAG / 向量检索（Phase 2）
 
 ---
 
@@ -78,13 +86,14 @@ DbOptimizer 是一个基于 Microsoft Agent Framework (MAF) 和 Blazor WebAssemb
 
 ```
 src/
+├── DbOptimizer.AppHost/          # Aspire 编排
 ├── DbOptimizer.API/              # Web API 层
 │   ├── Controllers/              # REST API
-│   ├── Hubs/                     # SignalR
-│   └── MCP/                      # MCP Server
+│   └── Endpoints/                # SSE 端点
+├── DbOptimizer.AgentRuntime/     # MAF Agent 运行时
 ├── DbOptimizer.Core/             # 业务逻辑层
-│   ├── Agents/                   # MAF Agents
-│   ├── Tools/                    # MAF Tools
+│   ├── Workflows/                # MAF Workflows
+│   ├── Executors/                # MAF Executors
 │   ├── Services/                 # 业务服务
 │   └── Models/                   # 领域模型
 ├── DbOptimizer.Infrastructure/   # 基础设施层
@@ -92,7 +101,7 @@ src/
 │   ├── AI/                       # AI 服务
 │   ├── MCP/                      # MCP Client
 │   └── Repositories/             # 数据访问
-├── DbOptimizer.Web/              # Blazor 前端
+├── DbOptimizer.Web/              # Vue 3 前端
 │   ├── Pages/                    # 页面
 │   ├── Components/               # 组件
 │   └── Services/                 # 前端服务
@@ -224,68 +233,81 @@ public async Task<string> GetTableIndexesAsync(
 
 ## 前端开发规范
 
-### 1. Blazor 组件
+### 1. Vue 3 组件
 
 **原则**：
-- 组件职责单一
-- 通过参数传递数据
-- 通过事件回调通知父组件
+- 使用 Composition API（`<script setup>`）
+- 组件单一职责
+- Props 类型定义
+- 事件命名清晰
 
 **示例**：
-```razor
-@* AgentViewer.razor *@
-<MudCard>
-    <MudCardHeader>
-        <MudText Typo="Typo.h6">@AgentName</MudText>
-    </MudCardHeader>
-    <MudCardContent>
-        @foreach (var tool in ToolCalls)
-        {
-            <ToolCallItem Tool="@tool" />
-        }
-    </MudCardContent>
-</MudCard>
+```vue
+<script setup lang="ts">
+import { ref } from 'vue';
 
-@code {
-    [Parameter] public string AgentName { get; set; }
-    [Parameter] public List<ToolCallDto> ToolCalls { get; set; }
+interface Props {
+  agentName: string;
+  toolCalls: ToolCall[];
 }
+
+const props = defineProps<Props>();
+</script>
+
+<template>
+  <el-card>
+    <template #header>
+      <h3>{{ agentName }}</h3>
+    </template>
+    <tool-call-item 
+      v-for="tool in toolCalls" 
+      :key="tool.id" 
+      :tool="tool" 
+    />
+  </el-card>
+</template>
 ```
 
 ### 2. 状态管理
 
-**使用 Fluxor**：
-- State：不可变
-- Action：描述发生了什么
-- Reducer：根据 Action 更新 State
-- Effect：处理副作用（API 调用）
+**使用 Pinia**：
+- State：响应式状态
+- Getters：计算属性
+- Actions：异步操作
 
 **示例**：
-```csharp
-// State
-public record AnalysisState
-{
-    public string CurrentSessionId { get; init; }
-    public List<AgentExecutionDto> AgentExecutions { get; init; }
-    public bool IsAnalyzing { get; init; }
-}
+```typescript
+// stores/analysis.ts
+import { defineStore } from 'pinia';
 
-// Action
-public record StartAnalysisAction(string Sql);
-public record AgentStartedAction(string SessionId, string AgentName);
+export const useAnalysisStore = defineStore('analysis', {
+  state: () => ({
+    currentSessionId: null as string | null,
+    isAnalyzing: false,
+  }),
+  
+  actions: {
+    async startAnalysis(sql: string) {
+      this.isAnalyzing = true;
+      const response = await api.analyze(sql);
+      this.currentSessionId = response.sessionId;
+    }
+  }
+### 3. SSE 集成
 
-// Reducer
-public static AnalysisState Reduce(AnalysisState state, AgentStartedAction action)
-{
-    return state with
-    {
-        AgentExecutions = state.AgentExecutions.Append(new AgentExecutionDto
-        {
-            AgentName = action.AgentName,
-            Status = "running"
-        }).ToList()
-    };
-}
+**前端订阅**：
+```typescript
+const eventSource = new EventSource(`/api/workflows/${sessionId}/events`);
+
+eventSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  store.updateWorkflowState(data);
+};
+
+eventSource.onerror = () => {
+  console.error('SSE connection error');
+  eventSource.close();
+};
 ```
 
 ---
@@ -388,10 +410,10 @@ docs(architecture): 更新架构设计文档
 
 ### 3. 前端
 
-- 启用 Blazor AOT
-- 使用 Lazy Loading
-- 优化资源大小
-- 使用虚拟滚动
+- 组件懒加载
+- 虚拟滚动（大列表）
+- 防抖/节流
+- 代码分割
 
 ---
 

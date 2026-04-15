@@ -2,40 +2,34 @@
 
 **AI 驱动的数据库性能优化平台**
 
-基于 Microsoft Agent Framework (MAF) 和 Blazor WebAssembly 构建的智能数据库优化工具，通过多 Agent 协作提供深度的性能分析和优化建议。
+基于 Microsoft Agent Framework (MAF) 构建的智能数据库优化工具，通过多 Agent 协作提供深度的性能分析和优化建议。
 
 ---
 
 ## 核心特性
 
 ### 🤖 多 Agent 协作分析
-- **SqlParserAgent**：分析 SQL 语法结构
-- **ExecutionPlanAgent**：解读执行计划
-- **IndexAdvisorAgent**：推荐索引策略
-- **ConfigurationAdvisorAgent**：分析数据库配置
-- **CoordinatorAgent**：整合分析结果
+- **SQL 层调优**：SQL 解析 + 执行计划分析 + 索引推荐
+- **数据库层调优**：参数配置 + 资源分析 + 负载特征
+- **人工审核**：所有 AI 建议必须人工审核，驳回后回流重跑
+- **置信度 + 证据链**：每个建议都带置信度、原因、证据引用
 
 ### 🔍 透明化 AI 过程
-- 实时显示 Agent 工作过程
+- 实时显示 Agent 工作过程（SSE 推送）
 - 展示工具调用（Function Calling）
 - 展示 AI 决策推理链
-- 完整的执行记录
+- 完整的执行记录 + Workflow checkpoint
 
-### 📊 全方位性能监控
-- 慢查询自动采集
-- 性能指标趋势分析
-- 资源使用监控
-- 配置参数优化建议
+### 📊 慢查询分析
+- 手工输入 SQL 分析
+- 慢 SQL 自动抓取（MySQL slow log / PostgreSQL pg_stat_statements）
+- 执行计划解读
+- 索引推荐
 
-### 🧠 RAG 知识库
-- 历史优化案例
-- 数据库最佳实践
-- 语义搜索相似问题
-
-### 🔌 可扩展集成
-- **MCP Server**：对外提供标准化服务
-- **MCP Client**：复用现有数据库 MCP
-- **Skills 插件**：支持自定义扩展
+### 🔌 MCP 集成
+- **MySQL MCP**：直接接入现有 MySQL MCP
+- **PostgreSQL MCP**：直接接入现有 PostgreSQL MCP
+- 平台自身不实现 MCP Server（第一版）
 
 ---
 
@@ -45,13 +39,13 @@
 - .NET 10
 - ASP.NET Core Web API
 - Microsoft Agent Framework (MAF)
-- SignalR（实时通信）
+- Aspire（本地编排 PostgreSQL / Redis）
+- SSE（实时推送）
 - Entity Framework Core
-- Quartz.NET（定时任务）
 
 **前端**：
-- Blazor WebAssembly
-- MudBlazor（UI 组件）
+- Vue 3
+- Element Plus（UI 组件）
 - Monaco Editor（SQL 编辑器）
 - ECharts（图表）
 
@@ -74,7 +68,6 @@
 ### 前置要求
 
 - .NET 10 SDK
-- Docker & Docker Compose
 - Azure OpenAI API Key 或 Anthropic API Key
 
 ### 安装步骤
@@ -91,24 +84,15 @@ cp .env.example .env
 # 编辑 .env，填入 API Key
 ```
 
-3. **启动依赖服务**
+3. **启动应用（Aspire 自动编排 PostgreSQL / Redis）**
 ```bash
-docker-compose up -d
+dotnet run --project src/DbOptimizer.AppHost
 ```
 
-4. **运行数据库迁移**
-```bash
-dotnet ef database update --project src/DbOptimizer.Infrastructure
+4. **访问应用**
 ```
-
-5. **启动应用**
-```bash
-dotnet run --project src/DbOptimizer.API
-```
-
-6. **访问应用**
-```
-http://localhost:5000
+http://localhost:5000  # Web UI
+http://localhost:5001  # Aspire Dashboard
 ```
 
 ---
@@ -118,23 +102,19 @@ http://localhost:5000
 ```
 DbOptimizer/
 ├── src/
-│   ├── DbOptimizer.API/              # Web API
-│   ├── DbOptimizer.Core/             # 业务逻辑 + Agents
-│   ├── DbOptimizer.Infrastructure/   # 数据访问 + 外部服务
-│   ├── DbOptimizer.Web/              # Blazor 前端
-│   ├── DbOptimizer.Shared/           # 共享模型
-│   └── DbOptimizer.Skills/           # Skills 实现
+│   ├── DbOptimizer.AppHost/          # Aspire 编排
+│   ├── DbOptimizer.API/              # ASP.NET Core Web API
+│   ├── DbOptimizer.AgentRuntime/     # MAF Agent 运行时
+│   ├── DbOptimizer.Core/             # 业务逻辑 + Workflow
+│   ├── DbOptimizer.Infrastructure/   # 数据访问 + MCP 集成
+│   ├── DbOptimizer.Web/              # Vue 3 前端
+│   └── DbOptimizer.Shared/           # 共享模型
 ├── tests/
 │   ├── DbOptimizer.Tests.Unit/
 │   └── DbOptimizer.Tests.Integration/
 ├── docs/
-│   ├── superpowers/specs/
-│   │   └── 2026-04-14-dboptimizer-design.md
-│   ├── ARCHITECTURE.md
-│   ├── DATA_MODEL.md
-│   └── IMPLEMENTATION_PLAN.md
-├── mcp/                              # MCP Server 配置
-├── docker-compose.yml
+│   ├── REQUIREMENTS.md               # 需求文档
+│   └── DESIGN.md                     # 设计文档
 ├── CLAUDE.md
 └── README.md
 ```
@@ -143,10 +123,8 @@ DbOptimizer/
 
 ## 文档
 
-- [需求设计文档](docs/superpowers/specs/2026-04-14-dboptimizer-design.md)
-- [架构设计文档](docs/ARCHITECTURE.md)
-- [数据模型文档](docs/DATA_MODEL.md)
-- [实现计划](docs/IMPLEMENTATION_PLAN.md)
+- [需求文档](docs/REQUIREMENTS.md)
+- [设计文档](docs/DESIGN.md)
 
 ---
 
@@ -177,36 +155,38 @@ WHERE u.created_at > '2024-01-01'
 - 原因：Buffer Pool 命中率仅 60%
 - 预估提升：查询性能提升 30-50%
 
-### 3. MCP 集成
+### 3. 人工审核
 
-```bash
-# 在 Claude Code 中使用
-/analyze-slow-query "SELECT * FROM users WHERE email = 'test@example.com'"
-```
+**审核流程**：
+1. Agent 生成优化建议
+2. 前端展示建议 + 置信度 + 证据链
+3. 用户审核：同意 / 驳回 / 调整
+4. 驳回后回流 Workflow 重新生成
 
 ---
 
 ## 开发路线图
 
-### Phase 1: 核心 AI 能力 ✅
-- [x] 多 Agent 协作
-- [x] 透明化 AI 过程
-- [x] 数据持久化
+### Phase 1: 核心功能（第一版）🚧
+- [ ] Aspire 编排 + 基础架构
+- [ ] MySQL & PostgreSQL MCP 接入
+- [ ] SQL 调优工作流（手工输入 + 慢 SQL 自动抓取）
+- [ ] 数据库层调优工作流
+- [ ] 人工审核 + 驳回回流
+- [ ] Agent 持久化 + Workflow checkpoint
+- [ ] 历史任务与版本查看
+- [ ] Vue 3 前端 + SSE 实时推送
 
-### Phase 2: 监控 + 配置优化 🚧
-- [ ] 慢查询监控
-- [ ] 配置优化
+### Phase 2: 增强功能 📅
+- [ ] 上下文压缩 / 摘要
 - [ ] RAG 知识库
+- [ ] Token 优化策略
+- [ ] 性能监控面板
 
-### Phase 3: MCP + Skills 📅
-- [ ] MCP Server
+### Phase 3: 扩展能力 💡
+- [ ] 平台对外暴露 MCP Server
 - [ ] Skills 插件系统
-- [ ] 文档完善
-
-### Phase 4: 生产级特性 💡
-- [ ] Agent 模式部署
-- [ ] 审批流
-- [ ] 告警通知
+- [ ] 多数据库类型扩展
 
 ---
 
@@ -233,7 +213,7 @@ MIT License
 ## 致谢
 
 - [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)
-- [Blazor](https://dotnet.microsoft.com/apps/aspnet/web-apps/blazor)
-- [MudBlazor](https://mudblazor.com/)
+- [Vue.js](https://vuejs.org/)
+- [Element Plus](https://element-plus.org/)
 - [Supabase Index Advisor](https://github.com/supabase/index_advisor)
 
