@@ -37,6 +37,8 @@ const action = ref<SubmitReviewPayload['action']>('approve')
 const adjustmentText = ref('')
 const currentLoadId = ref(0)
 const activeSessionId = ref('')
+const workspaceTaskId = ref('')
+const streamGeneration = ref(0)
 
 let eventSource: EventSource | null = null
 
@@ -54,13 +56,10 @@ onBeforeUnmount(() => {
 
 watch(selectedTaskId, async (taskId) => {
   if (!taskId) {
-    resetReviewForm()
-    selectedReview.value = null
-    workflow.value = null
-    historyDetail.value = null
-    replayEvents.value = []
-    activeSessionId.value = ''
-    closeEventSource()
+    return
+  }
+
+  if (workspaceTaskId.value === taskId && selectedReview.value) {
     return
   }
 
@@ -76,7 +75,7 @@ async function loadDashboard() {
   }
 }
 
-async function loadReviews() {
+async function loadReviews(options?: { preserveWorkspace?: boolean }) {
   loadingReviews.value = true
   try {
     const response = await getPendingReviews()
@@ -88,7 +87,10 @@ async function loadReviews() {
     }
 
     if (!selectedTaskId.value && response.items.length > 0) {
-      selectedTaskId.value = response.items[0].taskId
+      if (!options?.preserveWorkspace) {
+        selectedTaskId.value = response.items[0].taskId
+      }
+      return
     }
 
     if (
@@ -96,7 +98,7 @@ async function loadReviews() {
       selectedTaskId.value &&
       !response.items.some((item) => item.taskId === selectedTaskId.value)
     ) {
-      selectedTaskId.value = response.items[0]?.taskId ?? ''
+      selectedTaskId.value = options?.preserveWorkspace ? '' : (response.items[0]?.taskId ?? '')
     }
   } catch (error) {
     errorMessage.value = getErrorText(error)
@@ -105,21 +107,29 @@ async function loadReviews() {
   }
 }
 
+function refreshReviewQueue() {
+  void loadReviews()
+}
+
 async function loadReviewWorkspace(taskId: string, loadId: number) {
   loadingDetail.value = true
   errorMessage.value = ''
   successMessage.value = ''
   resetReviewForm()
   closeEventSource()
+  workspaceTaskId.value = ''
+  selectedReview.value = null
   workflow.value = null
   historyDetail.value = null
   replayEvents.value = []
+  activeSessionId.value = ''
 
   try {
     const detail = await getReview(taskId)
     if (loadId !== currentLoadId.value) return
 
     selectedReview.value = detail
+    workspaceTaskId.value = taskId
     activeSessionId.value = detail.sessionId
 
     const latestWorkflow = await getWorkflow(detail.sessionId)
@@ -135,32 +145,52 @@ async function loadReviewWorkspace(taskId: string, loadId: number) {
     historyDetail.value = history.status === 'fulfilled' ? history.value : null
     replayEvents.value = replay.status === 'fulfilled' ? replay.value.events : []
 
-    connectToWorkflowEvents(detail.sessionId)
+    connectToWorkflowEvents(detail.sessionId, loadId)
   } catch (error) {
-    errorMessage.value = getErrorText(error)
+    if (loadId === currentLoadId.value) {
+      errorMessage.value = getErrorText(error)
+    }
   } finally {
-    loadingDetail.value = false
+    if (loadId === currentLoadId.value) {
+      loadingDetail.value = false
+    }
   }
 }
 
-function connectToWorkflowEvents(sessionId: string) {
+function connectToWorkflowEvents(sessionId: string, loadId: number) {
   closeEventSource()
   sseState.value = 'connecting'
   activeSessionId.value = sessionId
+  streamGeneration.value += 1
+  const generation = streamGeneration.value
 
   const source = createWorkflowEventSource(sessionId)
   eventSource = source
 
   source.addEventListener('WorkflowEvent', (event) => {
-    if (activeSessionId.value !== sessionId) return
+    if (
+      activeSessionId.value !== sessionId ||
+      loadId !== currentLoadId.value ||
+      generation !== streamGeneration.value ||
+      eventSource !== source
+    ) {
+      return
+    }
     const data = JSON.parse((event as MessageEvent<string>).data) as WorkflowStreamEvent
     sseState.value = 'live'
     upsertReplayEvent(data)
-    void refreshWorkflow(sessionId)
+    void refreshWorkflow(sessionId, loadId, generation)
   })
 
   source.addEventListener('snapshot', (event) => {
-    if (activeSessionId.value !== sessionId) return
+    if (
+      activeSessionId.value !== sessionId ||
+      loadId !== currentLoadId.value ||
+      generation !== streamGeneration.value ||
+      eventSource !== source
+    ) {
+      return
+    }
     const data = JSON.parse((event as MessageEvent<string>).data) as WorkflowStreamEvent
     sseState.value = 'live'
     if (data.payload) {
@@ -169,12 +199,25 @@ function connectToWorkflowEvents(sessionId: string) {
   })
 
   source.addEventListener('heartbeat', () => {
-    if (activeSessionId.value !== sessionId) return
+    if (
+      activeSessionId.value !== sessionId ||
+      loadId !== currentLoadId.value ||
+      generation !== streamGeneration.value ||
+      eventSource !== source
+    ) {
+      return
+    }
     sseState.value = 'live'
   })
 
   source.onerror = () => {
-    if (activeSessionId.value !== sessionId) return
+    if (
+      activeSessionId.value !== sessionId ||
+      generation !== streamGeneration.value ||
+      eventSource !== source
+    ) {
+      return
+    }
     sseState.value = 'error'
   }
 }
@@ -182,11 +225,22 @@ function connectToWorkflowEvents(sessionId: string) {
 function closeEventSource() {
   eventSource?.close()
   eventSource = null
+  streamGeneration.value += 1
   sseState.value = 'idle'
 }
 
-async function refreshWorkflow(sessionId: string) {
-  if (activeSessionId.value !== sessionId) return
+async function refreshWorkflow(
+  sessionId: string,
+  loadId = currentLoadId.value,
+  generation = streamGeneration.value,
+) {
+  if (
+    activeSessionId.value !== sessionId ||
+    loadId !== currentLoadId.value ||
+    generation !== streamGeneration.value
+  ) {
+    return
+  }
 
   try {
     const [latestWorkflow, latestHistory] = await Promise.all([
@@ -194,7 +248,13 @@ async function refreshWorkflow(sessionId: string) {
       getHistoryDetail(sessionId),
     ])
 
-    if (activeSessionId.value !== sessionId) return
+    if (
+      activeSessionId.value !== sessionId ||
+      loadId !== currentLoadId.value ||
+      generation !== streamGeneration.value
+    ) {
+      return
+    }
     workflow.value = latestWorkflow
     historyDetail.value = latestHistory
   } catch {
@@ -224,19 +284,26 @@ async function handleSubmit() {
   try {
     const taskId = selectedReview.value.taskId
     const sessionId = selectedReview.value.sessionId
+    const loadId = currentLoadId.value
+    const generation = streamGeneration.value
     const payload = buildSubmitPayload()
     const result = await submitReview(taskId, payload)
     successMessage.value = `审核已提交：${result.status}`
     resetReviewForm()
 
-    await Promise.all([
-      loadDashboard(),
-      loadReviews(),
-      refreshWorkflow(sessionId),
-    ])
+    await refreshWorkflow(sessionId, loadId, generation)
 
     if (activeSessionId.value === sessionId) {
       historyDetail.value = await getHistoryDetail(sessionId)
+    }
+
+    await Promise.all([
+      loadDashboard(),
+      loadReviews({ preserveWorkspace: true }),
+    ])
+
+    if (activeSessionId.value === sessionId && !reviews.value.some((item) => item.taskId === taskId)) {
+      selectedTaskId.value = ''
     }
   } catch (error) {
     errorMessage.value = getErrorText(error)
@@ -345,7 +412,7 @@ function getErrorText(error: unknown) {
             <p class="panel-kicker">Queue</p>
             <h2>待审核任务</h2>
           </div>
-          <button class="ghost-button" type="button" @click="loadReviews">刷新</button>
+          <button class="ghost-button" type="button" @click="refreshReviewQueue">刷新</button>
         </div>
 
         <p v-if="loadingReviews" class="panel-note">正在加载待审核任务…</p>
