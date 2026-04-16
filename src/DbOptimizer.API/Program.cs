@@ -38,6 +38,8 @@ builder.Services.AddSingleton<ICheckpointStorage, PostgresRedisCheckpointStorage
 builder.Services.AddSingleton<IWorkflowEventPublisher, LoggingWorkflowEventPublisher>();
 builder.Services.AddSingleton<IWorkflowStateMachine, WorkflowStateMachine>();
 builder.Services.AddSingleton<IWorkflowRunner, WorkflowRunner>();
+builder.Services.AddSingleton<ISqlParser, LightweightSqlParser>();
+builder.Services.AddSingleton<IWorkflowExecutor, SqlParserExecutor>();
 builder.Services.AddSingleton<MigrationReadinessState>();
 builder.Services.AddHostedService<EfMigrationHostedService>();
 builder.Services.AddHostedService<RunningWorkflowRecoveryHostedService>();
