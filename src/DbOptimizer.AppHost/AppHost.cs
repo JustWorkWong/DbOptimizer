@@ -32,6 +32,7 @@ var mySqlInitDirectory = Path.Combine(builder.AppHostDirectory, "DatabaseInit", 
 
 var postgres = builder.AddPostgres("postgres", userName: postgresUser, password: postgresPassword, port: postgresPort)
     .WithDataVolume()
+    .WithEnvironment("POSTGRES_PASSWORD", postgresPassword)
     .WithInitFiles(postgresInitDirectory)
     .WithPgAdmin(pgAdmin =>
     {
@@ -43,6 +44,7 @@ var postgresDb = postgres.AddDatabase("dboptimizer-postgres", postgresDatabaseNa
 
 var mySql = builder.AddMySql("mysql", password: mySqlPassword, port: mySqlPort)
     .WithDataVolume()
+    .WithEnvironment("MYSQL_ROOT_PASSWORD", mySqlPassword)
     .WithInitFiles(mySqlInitDirectory)
     .WithPhpMyAdmin(phpMyAdmin =>
     {
