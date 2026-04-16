@@ -1,0 +1,15 @@
+<Project>
+  <PropertyGroup>
+    <!-- 覆盖率收集配置 -->
+    <CollectCoverage>true</CollectCoverage>
+    <CoverletOutputFormat>cobertura,opencover</CoverletOutputFormat>
+    <CoverletOutput>./coverage/</CoverletOutput>
+    <Threshold>80</Threshold>
+    <ThresholdType>line</ThresholdType>
+    <ThresholdStat>total</ThresholdStat>
+
+    <!-- 排除生成的文件和测试项目 -->
+    <ExcludeByFile>**/Migrations/*.cs</ExcludeByFile>
+    <ExcludeByAttribute>GeneratedCodeAttribute,CompilerGeneratedAttribute</ExcludeByAttribute>
+  </PropertyGroup>
+</Project>
