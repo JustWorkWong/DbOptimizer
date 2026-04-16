@@ -26,6 +26,7 @@ internal sealed class WorkflowRunner(
     ICheckpointStorage checkpointStorage,
     IWorkflowEventPublisher workflowEventPublisher,
     IWorkflowStateMachine workflowStateMachine,
+    IWorkflowExecutionAuditService workflowExecutionAuditService,
     ILogger<WorkflowRunner> logger) : IWorkflowRunner
 {
     public Task<WorkflowRunResult> RunAsync(
@@ -79,6 +80,11 @@ internal sealed class WorkflowRunner(
         {
             var executor = executors[index];
             var startedAt = DateTimeOffset.UtcNow;
+            var executionId = await workflowExecutionAuditService.StartExecutionAsync(
+                context,
+                executor.Name,
+                startedAt,
+                cancellationToken);
 
             context.SetCurrentExecutor(executor.Name);
             context.ApplyStatus(WorkflowCheckpointStatus.Running);
@@ -103,6 +109,16 @@ internal sealed class WorkflowRunner(
                     context.ApplyStatus(WorkflowCheckpointStatus.Failed);
                     context.Set("LastError", result.ErrorMessage ?? "Unknown workflow error.");
 
+                    await workflowExecutionAuditService.FailExecutionAsync(
+                        context,
+                        executionId,
+                        executor.Name,
+                        result.ErrorMessage ?? "Unknown workflow error.",
+                        startedAt,
+                        completedAt,
+                        result.Output,
+                        cancellationToken: cancellationToken);
+
                     await SaveCheckpointAndPublishAsync(context, cancellationToken);
                     await PublishTrackedEventAsync(
                         context,
@@ -124,6 +140,15 @@ internal sealed class WorkflowRunner(
 
                 workflowStateMachine.EnsureCanTransition(context.Status, result.NextStatus);
                 context.ApplyStatus(result.NextStatus);
+
+                await workflowExecutionAuditService.CompleteExecutionAsync(
+                    context,
+                    executionId,
+                    executor.Name,
+                    result,
+                    startedAt,
+                    completedAt,
+                    cancellationToken);
 
                 await PublishTrackedEventAsync(
                     context,
@@ -159,6 +184,14 @@ internal sealed class WorkflowRunner(
                     context.ApplyStatus(WorkflowCheckpointStatus.Cancelled);
                 }
 
+                await workflowExecutionAuditService.CancelExecutionAsync(
+                    context,
+                    executionId,
+                    executor.Name,
+                    startedAt,
+                    DateTimeOffset.UtcNow,
+                    CancellationToken.None);
+
                 context.Set("LastError", "Workflow cancelled.");
                 if (!WorkflowTimeline.GetEvents(context).Any(item => item.EventType == WorkflowEventType.WorkflowCancelled))
                 {
@@ -180,6 +213,16 @@ internal sealed class WorkflowRunner(
                 workflowStateMachine.EnsureCanTransition(context.Status, WorkflowCheckpointStatus.Failed);
                 context.ApplyStatus(WorkflowCheckpointStatus.Failed);
                 context.Set("LastError", ex.Message);
+
+                await workflowExecutionAuditService.FailExecutionAsync(
+                    context,
+                    executionId,
+                    executor.Name,
+                    ex.Message,
+                    startedAt,
+                    DateTimeOffset.UtcNow,
+                    exception: ex,
+                    cancellationToken: cancellationToken);
 
                 await SaveCheckpointAndPublishAsync(context, cancellationToken);
                 await PublishTrackedEventAsync(

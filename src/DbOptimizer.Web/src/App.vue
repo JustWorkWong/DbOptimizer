@@ -86,6 +86,26 @@ const progressEvents = computed(() =>
     ].includes(item.eventType),
   ),
 )
+const latestProgressEvent = computed(() => progressEvents.value.at(-1) ?? null)
+const workflowProgressSummary = computed(() => {
+  if (workflow.value?.errorMessage) {
+    return `任务失败：${workflow.value.errorMessage}`
+  }
+
+  if (workflow.value?.result?.summary) {
+    return workflow.value.result.summary
+  }
+
+  if (latestProgressEvent.value) {
+    return formatEventDescription(latestProgressEvent.value)
+  }
+
+  if (workflow.value?.currentExecutor) {
+    return `${formatExecutorLabel(workflow.value.currentExecutor)}进行中，请稍候。`
+  }
+
+  return '分析进行中，结果会随着工作流推进逐步显示。'
+})
 const canOpenCurrentReview = computed(() => Boolean(workflow.value?.reviewId))
 
 onMounted(async () => {
@@ -604,6 +624,151 @@ function statusTone(status: string) {
   }
 }
 
+function formatStatusLabel(status: string | null | undefined) {
+  switch (status) {
+    case 'Completed':
+      return '已完成'
+    case 'Approved':
+      return '已批准'
+    case 'Adjusted':
+      return '已调整'
+    case 'WaitingForReview':
+      return '待人工审核'
+    case 'Pending':
+      return '待处理'
+    case 'Running':
+      return '执行中'
+    case 'Cancelled':
+      return '已取消'
+    case 'Rejected':
+      return '已驳回'
+    case 'Failed':
+      return '执行失败'
+    default:
+      return status ?? '—'
+  }
+}
+
+function formatExecutorLabel(executorName: string | null | undefined) {
+  switch (executorName) {
+    case 'SqlParserExecutor':
+      return 'SQL 解析'
+    case 'ExecutionPlanExecutor':
+      return '执行计划分析'
+    case 'IndexAdvisorExecutor':
+      return '索引建议分析'
+    case 'CoordinatorExecutor':
+      return '结果汇总'
+    case 'HumanReviewExecutor':
+      return '人工审核'
+    case 'RegenerationExecutor':
+      return '结果重生成'
+    case 'ConfigCollectorExecutor':
+      return '配置采集'
+    case 'ConfigAnalyzerExecutor':
+      return '配置分析'
+    case 'ConfigCoordinatorExecutor':
+      return '配置汇总'
+    case 'ConfigReviewExecutor':
+      return '配置审核'
+    default:
+      return executorName ?? '—'
+  }
+}
+
+function getPayloadValue(payload: Record<string, unknown>, key: string) {
+  return payload[key]
+}
+
+function formatEventTitle(event: WorkflowStreamEvent) {
+  const payload = event.payload ?? {}
+  const executorName = getPayloadValue(payload, 'executorName')
+
+  switch (event.eventType) {
+    case 'WorkflowStarted':
+      return '任务已创建'
+    case 'ExecutorStarted':
+      return `${formatExecutorLabel(typeof executorName === 'string' ? executorName : null)}开始`
+    case 'ExecutorCompleted':
+      return `${formatExecutorLabel(typeof executorName === 'string' ? executorName : null)}完成`
+    case 'ExecutorFailed':
+      return `${formatExecutorLabel(typeof executorName === 'string' ? executorName : null)}失败`
+    case 'WorkflowWaitingReview':
+      return '等待人工审核'
+    case 'WorkflowCompleted':
+      return '任务完成'
+    case 'WorkflowCancelled':
+      return '任务已取消'
+    case 'WorkflowFailed':
+      return '任务失败'
+    default:
+      return event.eventType
+  }
+}
+
+function formatEventDescription(event: WorkflowStreamEvent) {
+  const payload = event.payload ?? {}
+  const executorName = typeof getPayloadValue(payload, 'executorName') === 'string'
+    ? String(getPayloadValue(payload, 'executorName'))
+    : null
+  const errorMessage = typeof getPayloadValue(payload, 'errorMessage') === 'string'
+    ? String(getPayloadValue(payload, 'errorMessage'))
+    : null
+  const durationMs = typeof getPayloadValue(payload, 'durationMs') === 'number'
+    ? Number(getPayloadValue(payload, 'durationMs'))
+    : null
+  const nextStatus = typeof getPayloadValue(payload, 'nextStatus') === 'string'
+    ? String(getPayloadValue(payload, 'nextStatus'))
+    : null
+  const reviewComment = typeof getPayloadValue(payload, 'reviewComment') === 'string'
+    ? String(getPayloadValue(payload, 'reviewComment'))
+    : null
+  const reviewStatus = typeof getPayloadValue(payload, 'reviewStatus') === 'string'
+    ? String(getPayloadValue(payload, 'reviewStatus'))
+    : null
+
+  switch (event.eventType) {
+    case 'WorkflowStarted':
+      return '已接收分析请求，系统正在准备执行链路。'
+    case 'ExecutorStarted':
+      return `${formatExecutorLabel(executorName)}开始执行。`
+    case 'ExecutorCompleted':
+      if (nextStatus === 'WaitingForReview') {
+        return `${formatExecutorLabel(executorName)}已完成，结果已提交人工审核。`
+      }
+      return durationMs !== null
+        ? `${formatExecutorLabel(executorName)}已完成，耗时 ${formatDurationMs(durationMs)}。`
+        : `${formatExecutorLabel(executorName)}已完成。`
+    case 'ExecutorFailed':
+      return errorMessage
+        ? `${formatExecutorLabel(executorName)}执行失败：${errorMessage}`
+        : `${formatExecutorLabel(executorName)}执行失败。`
+    case 'WorkflowWaitingReview':
+      return '自动分析已结束，当前正在等待人工确认。'
+    case 'WorkflowCompleted':
+      if (reviewStatus) {
+        return reviewComment
+          ? `任务已完成，审核结果：${formatStatusLabel(reviewStatus)}，备注：${reviewComment}`
+          : `任务已完成，审核结果：${formatStatusLabel(reviewStatus)}。`
+      }
+      return '全部执行步骤已完成。'
+    case 'WorkflowCancelled':
+      return '任务已被取消。'
+    case 'WorkflowFailed':
+      return errorMessage ? `任务失败：${errorMessage}` : '任务执行失败，请查看错误信息。'
+    default:
+      return JSON.stringify(payload)
+  }
+}
+
+function formatDurationMs(durationMs: number) {
+  if (durationMs < 1000) {
+    return `${durationMs} ms`
+  }
+
+  return `${(durationMs / 1000).toFixed(durationMs >= 10_000 ? 0 : 1)} s`
+}
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) return '—'
   return new Date(value).toLocaleString('zh-CN', {
@@ -726,7 +891,7 @@ function getErrorText(error: unknown) {
         <section v-if="workflow" class="info-block">
           <div class="block-head">
             <h3>分析结果</h3>
-            <span class="status-chip" :data-tone="statusTone(workflow.status)">{{ workflow.status }}</span>
+            <span class="status-chip" :data-tone="statusTone(workflow.status)">{{ formatStatusLabel(workflow.status) }}</span>
           </div>
 
           <div class="mini-grid">
@@ -736,7 +901,7 @@ function getErrorText(error: unknown) {
             </div>
             <div>
               <span class="mini-label">当前执行器</span>
-              <strong>{{ workflow.currentExecutor ?? '—' }}</strong>
+              <strong>{{ formatExecutorLabel(workflow.currentExecutor) }}</strong>
             </div>
             <div>
               <span class="mini-label">进度</span>
@@ -744,7 +909,7 @@ function getErrorText(error: unknown) {
             </div>
           </div>
 
-          <p class="summary-text">{{ workflow.result?.summary ?? '分析进行中，结果会在工作流推进后显示。' }}</p>
+          <p class="summary-text">{{ workflowProgressSummary }}</p>
 
           <div v-if="workflow.result?.indexRecommendations?.length" class="executor-list">
             <article
@@ -785,10 +950,11 @@ function getErrorText(error: unknown) {
             class="timeline-item"
           >
             <div class="timeline-top">
-              <strong>{{ event.eventType }}</strong>
+              <strong>{{ formatEventTitle(event) }}</strong>
               <span>#{{ event.sequence ?? '—' }}</span>
             </div>
-            <p>{{ formatDateTime(event.timestamp) }}</p>
+            <p>{{ formatEventDescription(event) }}</p>
+            <small>{{ formatDateTime(event.timestamp) }}</small>
           </article>
         </div>
       </aside>
@@ -974,11 +1140,11 @@ function getErrorText(error: unknown) {
           <div class="live-summary">
             <div>
               <span class="mini-label">状态</span>
-              <strong>{{ workflow.status }}</strong>
+              <strong>{{ formatStatusLabel(workflow.status) }}</strong>
             </div>
             <div>
               <span class="mini-label">当前执行器</span>
-              <strong>{{ workflow.currentExecutor ?? '—' }}</strong>
+              <strong>{{ formatExecutorLabel(workflow.currentExecutor) }}</strong>
             </div>
             <div>
               <span class="mini-label">进度</span>
@@ -986,7 +1152,7 @@ function getErrorText(error: unknown) {
             </div>
             <div>
               <span class="mini-label">审核状态</span>
-              <strong>{{ workflow.reviewStatus ?? '—' }}</strong>
+              <strong>{{ formatStatusLabel(workflow.reviewStatus) }}</strong>
             </div>
           </div>
 
@@ -999,10 +1165,11 @@ function getErrorText(error: unknown) {
             <div class="timeline-list">
               <article v-for="event in replayEvents.slice().reverse()" :key="`${event.sequence ?? event.timestamp}-${event.eventType}`" class="timeline-item">
                 <div class="timeline-top">
-                  <strong>{{ event.eventType }}</strong>
+                  <strong>{{ formatEventTitle(event) }}</strong>
                   <span>#{{ event.sequence ?? '—' }}</span>
                 </div>
-                <p>{{ formatDateTime(event.timestamp) }}</p>
+                <p>{{ formatEventDescription(event) }}</p>
+                <small>{{ formatDateTime(event.timestamp) }}</small>
               </article>
             </div>
           </section>
@@ -1010,7 +1177,7 @@ function getErrorText(error: unknown) {
           <section v-if="historyDetail" class="info-block compact">
             <div class="block-head">
               <h3>提交后历史</h3>
-              <span>{{ historyDetail.status }}</span>
+              <span>{{ formatStatusLabel(historyDetail.status) }}</span>
             </div>
 
             <div class="mini-grid">
@@ -1027,8 +1194,8 @@ function getErrorText(error: unknown) {
             <div class="executor-list">
               <article v-for="executor in historyDetail.executors" :key="`${executor.executorName}-${executor.startedAt}`" class="executor-card">
                 <div class="timeline-top">
-                  <strong>{{ executor.executorName }}</strong>
-                  <span>{{ executor.status }}</span>
+                  <strong>{{ formatExecutorLabel(executor.executorName) }}</strong>
+                  <span>{{ formatStatusLabel(executor.status) }}</span>
                 </div>
                 <p>{{ executor.duration }}s</p>
               </article>
@@ -1130,7 +1297,7 @@ function getErrorText(error: unknown) {
           <div class="summary-card">
             <div class="summary-head">
               <div>
-                <span class="status-chip" :data-tone="statusTone(historyDetail.status)">{{ historyDetail.status }}</span>
+                <span class="status-chip" :data-tone="statusTone(historyDetail.status)">{{ formatStatusLabel(historyDetail.status) }}</span>
                 <h3>{{ historyDetail.workflowType }}</h3>
               </div>
               <div class="confidence-meter">
@@ -1170,8 +1337,8 @@ function getErrorText(error: unknown) {
                 class="executor-card"
               >
                 <div class="timeline-top">
-                  <strong>{{ executor.executorName }}</strong>
-                  <span class="status-chip" :data-tone="statusTone(executor.status)">{{ executor.status }}</span>
+                  <strong>{{ formatExecutorLabel(executor.executorName) }}</strong>
+                  <span class="status-chip" :data-tone="statusTone(executor.status)">{{ formatStatusLabel(executor.status) }}</span>
                 </div>
                 <p>{{ formatDateTime(executor.startedAt) }} → {{ formatDateTime(executor.completedAt) }}</p>
                 <small>{{ executor.duration }}s</small>
@@ -1219,10 +1386,11 @@ function getErrorText(error: unknown) {
 
         <div v-if="currentReplayEvent" class="summary-card compact-card">
           <div class="timeline-top">
-            <strong>{{ currentReplayEvent.eventType }}</strong>
+            <strong>{{ formatEventTitle(currentReplayEvent) }}</strong>
             <span>#{{ currentReplayEvent.sequence ?? '—' }}</span>
           </div>
-          <p>{{ formatDateTime(currentReplayEvent.timestamp) }}</p>
+          <p>{{ formatEventDescription(currentReplayEvent) }}</p>
+          <small>{{ formatDateTime(currentReplayEvent.timestamp) }}</small>
           <pre>{{ JSON.stringify(currentReplayEvent.payload, null, 2) }}</pre>
         </div>
       </aside>
@@ -1249,10 +1417,11 @@ function getErrorText(error: unknown) {
             @click="replayIndex = index"
           >
             <div class="timeline-top">
-              <strong>{{ event.eventType }}</strong>
+              <strong>{{ formatEventTitle(event) }}</strong>
               <span>#{{ event.sequence ?? '—' }}</span>
             </div>
-            <p>{{ formatDateTime(event.timestamp) }}</p>
+            <p>{{ formatEventDescription(event) }}</p>
+            <small>{{ formatDateTime(event.timestamp) }}</small>
             <small>{{ event.sessionId }}</small>
           </article>
         </div>

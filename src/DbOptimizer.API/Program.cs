@@ -6,10 +6,13 @@ using DbOptimizer.API.Workflows;
 using DbOptimizer.API.SlowQuery;
 using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
+using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 var postgreSqlConnectionString = ResolvePostgreSqlConnectionString(builder.Configuration);
 var redisConnectionString = ResolveRedisConnectionString(builder.Configuration);
+var corsOrigins = builder.Configuration.GetSection("DbOptimizer:Cors:AllowedOrigins").Get<string[]>()
+    ?? ["http://127.0.0.1:5173", "http://localhost:5173"];
 var executionPlanOptions = builder.Configuration.GetSection(ExecutionPlanOptions.SectionName).Get<ExecutionPlanOptions>()
     ?? CreateDefaultExecutionPlanOptions();
 var workflowRuntimeOptions = builder.Configuration.GetSection(WorkflowRuntimeOptions.SectionName).Get<WorkflowRuntimeOptions>()
@@ -27,13 +30,32 @@ builder.Logging.Configure(options =>
         ActivityTrackingOptions.ParentId;
 });
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("frontend-dev", policy =>
+    {
+        policy
+            .WithOrigins(corsOrigins)
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "DbOptimizer API",
+        Version = "v1",
+        Description = "Workflow, review, dashboard, and history endpoints for DbOptimizer."
+    });
+});
+
 /* =========================
  * EF Core 迁移启动注册
  * - 启动时执行 Database.MigrateAsync()
  * - 迁移成功后再标记健康就绪
  * ========================= */
-builder.Services.AddDbContext<DbOptimizerDbContext>(options =>
-    options.UseNpgsql(postgreSqlConnectionString));
 builder.Services.AddDbContextFactory<DbOptimizerDbContext>(options =>
     options.UseNpgsql(postgreSqlConnectionString));
 builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
@@ -49,6 +71,7 @@ builder.Services.AddSingleton<WorkflowEventHub>();
 builder.Services.AddSingleton<IWorkflowEventPublisher>(serviceProvider => serviceProvider.GetRequiredService<WorkflowEventHub>());
 builder.Services.AddSingleton<IWorkflowEventQueryService>(serviceProvider => serviceProvider.GetRequiredService<WorkflowEventHub>());
 builder.Services.AddSingleton<IWorkflowStateMachine, WorkflowStateMachine>();
+builder.Services.AddSingleton<IWorkflowExecutionAuditService, WorkflowExecutionAuditService>();
 builder.Services.AddSingleton<IWorkflowRunner, WorkflowRunner>();
 builder.Services.AddSingleton<IWorkflowExecutionScheduler, WorkflowExecutionScheduler>();
 builder.Services.AddSingleton<IWorkflowQueryService, WorkflowQueryService>();
@@ -92,6 +115,14 @@ builder.Services.AddHostedService<RunningWorkflowRecoveryHostedService>();
 builder.Services.AddHostedService<SlowQueryCollectionService>();
 
 var app = builder.Build();
+
+app.UseCors("frontend-dev");
+app.UseSwagger();
+app.UseSwaggerUI(options =>
+{
+    options.SwaggerEndpoint("/swagger/v1/swagger.json", "DbOptimizer API v1");
+    options.RoutePrefix = "swagger";
+});
 
 app.Use(async (context, next) =>
 {

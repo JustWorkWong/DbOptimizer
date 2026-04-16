@@ -11,7 +11,7 @@ namespace DbOptimizer.API.DatabaseMigrations;
  * 3) 失败时阻断启动并记录错误摘要
  * ========================= */
 internal sealed class EfMigrationHostedService(
-    IServiceProvider serviceProvider,
+    IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
     MigrationReadinessState readinessState,
     ILogger<EfMigrationHostedService> logger) : IHostedService
 {
@@ -19,9 +19,7 @@ internal sealed class EfMigrationHostedService(
     {
         try
         {
-            using var scope = serviceProvider.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<DbOptimizerDbContext>();
-
+            await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
             await dbContext.Database.MigrateAsync(cancellationToken);
 
             readinessState.MarkReady();
