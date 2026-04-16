@@ -169,6 +169,32 @@ p {
   align-items: start;
 }
 
+.view-switcher {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 18px;
+  flex-wrap: wrap;
+}
+
+.view-tab {
+  border: 1px solid rgba(41, 58, 53, 0.16);
+  background: rgba(255, 249, 239, 0.86);
+  color: var(--text);
+  padding: 11px 16px;
+  border-radius: 999px;
+}
+
+.view-tab.active {
+  background: linear-gradient(135deg, var(--primary), var(--primary-strong));
+  color: #fff;
+  border-color: transparent;
+}
+
+.view-tab.compact {
+  padding: 8px 12px;
+  min-width: 66px;
+}
+
 .panel {
   border-radius: var(--radius-lg);
   padding: 20px;
@@ -200,6 +226,26 @@ p {
   border-radius: var(--radius-md);
   background: rgba(255, 250, 240, 0.75);
   border: 1px dashed rgba(41, 58, 53, 0.18);
+}
+
+.filter-stack,
+.pager-row,
+.replay-controls,
+.speed-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.filter-stack,
+.pager-row {
+  margin-bottom: 16px;
+}
+
+.pager-row {
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
 }
 
 .queue-list,
@@ -379,6 +425,16 @@ textarea {
   min-height: 96px;
 }
 
+select {
+  width: 100%;
+  min-width: 150px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(41, 58, 53, 0.16);
+  background: rgba(255, 252, 244, 0.95);
+  color: var(--text);
+}
+
 textarea:focus,
 .ghost-button:focus,
 .primary-button:focus,
@@ -435,6 +491,24 @@ textarea:focus,
 .message.success {
   background: rgba(38, 100, 67, 0.1);
   color: var(--success);
+}
+
+.compact-card {
+  margin-top: 18px;
+}
+
+.replay-controls,
+.speed-row {
+  margin-bottom: 14px;
+}
+
+.replay-list .timeline-item {
+  cursor: pointer;
+}
+
+.replay-list .timeline-item.active {
+  border-color: rgba(17, 94, 89, 0.35);
+  background: rgba(239, 249, 244, 0.96);
 }
 
 .ghost-button,

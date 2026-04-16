@@ -78,6 +78,24 @@ export interface HistoryDetail {
   } | null
 }
 
+export interface HistoryListItem {
+  sessionId: string
+  workflowType: string
+  status: string
+  startedAt: string
+  completedAt: string | null
+  duration: number
+  recommendationCount: number
+}
+
+export interface HistoryListPayload {
+  items: HistoryListItem[]
+  page: number
+  pageSize: number
+  total: number
+  hasMore: boolean
+}
+
 export interface ReplayResponse {
   sessionId: string
   events: WorkflowStreamEvent[]
@@ -186,6 +204,23 @@ export function getWorkflow(sessionId: string) {
 
 export function getHistoryDetail(sessionId: string) {
   return fetchEnvelope<HistoryDetail>(`/api/history/${sessionId}`)
+}
+
+export function getHistoryList(params?: {
+  workflowType?: string
+  status?: string
+  page?: number
+  pageSize?: number
+}) {
+  const query = new URLSearchParams()
+
+  if (params?.workflowType) query.set('workflowType', params.workflowType)
+  if (params?.status) query.set('status', params.status)
+  if (params?.page) query.set('page', `${params.page}`)
+  if (params?.pageSize) query.set('pageSize', `${params.pageSize}`)
+
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  return fetchEnvelope<HistoryListPayload>(`/api/history${suffix}`)
 }
 
 export function getHistoryReplay(sessionId: string) {

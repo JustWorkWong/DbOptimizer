@@ -4,6 +4,7 @@ import {
   createWorkflowEventSource,
   getDashboardStats,
   getHistoryDetail,
+  getHistoryList,
   getHistoryReplay,
   getPendingReviews,
   getReview,
@@ -11,6 +12,7 @@ import {
   submitReview,
   type DashboardStats,
   type HistoryDetail,
+  type HistoryListItem,
   type OptimizationReport,
   type ReviewDetail,
   type ReviewListItem,
@@ -22,10 +24,20 @@ import {
 const stats = ref<DashboardStats | null>(null)
 const reviews = ref<ReviewListItem[]>([])
 const selectedTaskId = ref('')
+const activeView = ref<'review' | 'history' | 'replay'>('review')
 const selectedReview = ref<ReviewDetail | null>(null)
 const workflow = ref<WorkflowStatus | null>(null)
 const historyDetail = ref<HistoryDetail | null>(null)
 const replayEvents = ref<WorkflowStreamEvent[]>([])
+const historyItems = ref<HistoryListItem[]>([])
+const selectedHistorySessionId = ref('')
+const replaySessionId = ref('')
+const loadingHistory = ref(false)
+const historyPage = ref(1)
+const historyPageSize = ref(12)
+const historyTotal = ref(0)
+const historyStatusFilter = ref('')
+const historyTypeFilter = ref('')
 const feedback = ref('')
 const errorMessage = ref('')
 const successMessage = ref('')
@@ -39,19 +51,28 @@ const currentLoadId = ref(0)
 const activeSessionId = ref('')
 const workspaceTaskId = ref('')
 const streamGeneration = ref(0)
+const replayIndex = ref(0)
+const replaySpeed = ref(1)
+const replayPlaying = ref(false)
 
 let eventSource: EventSource | null = null
+let replayTimer: number | null = null
 
 const report = computed<OptimizationReport | null>(() => {
   return workflow.value?.result ?? historyDetail.value?.result ?? selectedReview.value?.recommendations ?? null
 })
 
+const currentReplayEvent = computed(() => replayEvents.value[replayIndex.value] ?? null)
+const historyHasPreviousPage = computed(() => historyPage.value > 1)
+const historyHasNextPage = computed(() => historyPage.value * historyPageSize.value < historyTotal.value)
+
 onMounted(async () => {
-  await Promise.all([loadDashboard(), loadReviews()])
+  await Promise.all([loadDashboard(), loadReviews(), loadHistoryList()])
 })
 
 onBeforeUnmount(() => {
   closeEventSource()
+  stopReplay()
 })
 
 watch(selectedTaskId, async (taskId) => {
@@ -109,6 +130,72 @@ async function loadReviews(options?: { preserveWorkspace?: boolean }) {
 
 function refreshReviewQueue() {
   void loadReviews()
+}
+
+async function loadHistoryList() {
+  loadingHistory.value = true
+  try {
+    const response = await getHistoryList({
+      workflowType: historyTypeFilter.value || undefined,
+      status: historyStatusFilter.value || undefined,
+      page: historyPage.value,
+      pageSize: historyPageSize.value,
+    })
+
+    historyItems.value = response.items
+    historyTotal.value = response.total
+
+    if (!selectedHistorySessionId.value && response.items.length > 0) {
+      void selectHistorySession(response.items[0].sessionId)
+    }
+
+    if (selectedHistorySessionId.value && !response.items.some((item) => item.sessionId === selectedHistorySessionId.value)) {
+      selectedHistorySessionId.value = response.items[0]?.sessionId ?? ''
+      if (response.items[0]) {
+        void selectHistorySession(response.items[0].sessionId)
+      }
+    }
+  } catch (error) {
+    errorMessage.value = getErrorText(error)
+  } finally {
+    loadingHistory.value = false
+  }
+}
+
+async function selectHistorySession(sessionId: string) {
+  selectedHistorySessionId.value = sessionId
+  replaySessionId.value = sessionId
+  replayIndex.value = 0
+  replayPlaying.value = false
+  stopReplay()
+
+  try {
+    const [detail, replay] = await Promise.all([
+      getHistoryDetail(sessionId),
+      getHistoryReplay(sessionId),
+    ])
+    historyDetail.value = detail
+    replayEvents.value = replay.events
+  } catch (error) {
+    errorMessage.value = getErrorText(error)
+  }
+}
+
+async function openReplaySession(sessionId: string) {
+  activeView.value = 'replay'
+  await selectHistorySession(sessionId)
+}
+
+function applyHistoryFilters() {
+  historyPage.value = 1
+  void loadHistoryList()
+}
+
+function changeHistoryPage(direction: -1 | 1) {
+  const nextPage = historyPage.value + direction
+  if (nextPage < 1) return
+  historyPage.value = nextPage
+  void loadHistoryList()
 }
 
 async function loadReviewWorkspace(taskId: string, loadId: number) {
@@ -338,6 +425,53 @@ function resetReviewForm() {
   adjustmentText.value = ''
 }
 
+function stopReplay() {
+  if (replayTimer !== null) {
+    window.clearInterval(replayTimer)
+    replayTimer = null
+  }
+  replayPlaying.value = false
+}
+
+function playReplay() {
+  if (replayEvents.value.length === 0) return
+
+  stopReplay()
+  replayPlaying.value = true
+  replayTimer = window.setInterval(() => {
+    if (replayIndex.value >= replayEvents.value.length - 1) {
+      stopReplay()
+      return
+    }
+
+    replayIndex.value += 1
+  }, Math.max(180, 900 / replaySpeed.value))
+}
+
+function toggleReplayPlayback() {
+  if (replayPlaying.value) {
+    stopReplay()
+  } else {
+    playReplay()
+  }
+}
+
+function stepReplay(direction: -1 | 1) {
+  stopReplay()
+  if (replayEvents.value.length === 0) return
+  replayIndex.value = Math.min(
+    replayEvents.value.length - 1,
+    Math.max(0, replayIndex.value + direction),
+  )
+}
+
+function setReplaySpeed(speed: number) {
+  replaySpeed.value = speed
+  if (replayPlaying.value) {
+    playReplay()
+  }
+}
+
 function statusTone(status: string) {
   switch (status) {
     case 'Completed':
@@ -405,7 +539,19 @@ function getErrorText(error: unknown) {
       </div>
     </header>
 
-    <section class="workspace-grid">
+    <nav class="view-switcher" aria-label="workspace views">
+      <button type="button" class="view-tab" :class="{ active: activeView === 'review' }" @click="activeView = 'review'">
+        审核工作台
+      </button>
+      <button type="button" class="view-tab" :class="{ active: activeView === 'history' }" @click="activeView = 'history'">
+        历史任务
+      </button>
+      <button type="button" class="view-tab" :class="{ active: activeView === 'replay' }" @click="activeView = 'replay'">
+        运行回放
+      </button>
+    </nav>
+
+    <section v-if="activeView === 'review'" class="workspace-grid">
       <aside class="panel review-queue">
         <div class="panel-head">
           <div>
@@ -647,6 +793,227 @@ function getErrorText(error: unknown) {
           </section>
         </template>
       </aside>
+    </section>
+
+    <section v-else-if="activeView === 'history'" class="workspace-grid history-grid">
+      <aside class="panel review-queue">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">History</p>
+            <h2>历史任务</h2>
+          </div>
+          <button class="ghost-button" type="button" @click="loadHistoryList">刷新</button>
+        </div>
+
+        <div class="filter-stack">
+          <label class="field-label">
+            类型
+            <select v-model="historyTypeFilter" @change="applyHistoryFilters">
+              <option value="">全部</option>
+              <option value="SqlAnalysis">SqlAnalysis</option>
+            </select>
+          </label>
+          <label class="field-label">
+            状态
+            <select v-model="historyStatusFilter" @change="applyHistoryFilters">
+              <option value="">全部</option>
+              <option value="Completed">Completed</option>
+              <option value="WaitingForReview">WaitingForReview</option>
+              <option value="Running">Running</option>
+              <option value="Failed">Failed</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+          </label>
+        </div>
+
+        <p v-if="loadingHistory" class="panel-note">正在加载历史任务…</p>
+        <p v-else-if="historyItems.length === 0" class="panel-note">当前筛选下没有历史任务。</p>
+
+        <div v-else class="queue-list">
+          <button
+            v-for="item in historyItems"
+            :key="item.sessionId"
+            type="button"
+            class="queue-item"
+            :class="{ active: item.sessionId === selectedHistorySessionId }"
+            @click="selectHistorySession(item.sessionId)"
+          >
+            <div class="queue-title">
+              <strong>{{ item.workflowType }}</strong>
+              <span class="status-chip" :data-tone="statusTone(item.status)">{{ item.status }}</span>
+            </div>
+            <div class="queue-meta">
+              <span>{{ item.sessionId.slice(0, 8) }}</span>
+              <span>{{ formatDateTime(item.startedAt) }}</span>
+            </div>
+            <p class="queue-summary">
+              推荐 {{ item.recommendationCount }} 条 · 耗时 {{ item.duration }}s
+            </p>
+          </button>
+        </div>
+
+        <div class="pager-row">
+          <button class="ghost-button" type="button" :disabled="!historyHasPreviousPage" @click="changeHistoryPage(-1)">
+            上一页
+          </button>
+          <span class="panel-kicker">第 {{ historyPage }} 页 / 共 {{ Math.max(1, Math.ceil(historyTotal / historyPageSize)) }} 页</span>
+          <button class="ghost-button" type="button" :disabled="!historyHasNextPage" @click="changeHistoryPage(1)">
+            下一页
+          </button>
+        </div>
+      </aside>
+
+      <main class="panel review-detail">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Detail</p>
+            <h2>任务详情</h2>
+          </div>
+          <button
+            v-if="historyDetail"
+            class="ghost-button"
+            type="button"
+            @click="openReplaySession(historyDetail.sessionId)"
+          >
+            打开回放
+          </button>
+        </div>
+
+        <div v-if="!historyDetail" class="empty-state">
+          从左侧选择一条历史任务，我们会在这里展示运行结果和执行链。
+        </div>
+
+        <template v-else>
+          <div class="summary-card">
+            <div class="summary-head">
+              <div>
+                <span class="status-chip" :data-tone="statusTone(historyDetail.status)">{{ historyDetail.status }}</span>
+                <h3>{{ historyDetail.workflowType }}</h3>
+              </div>
+              <div class="confidence-meter">
+                <span>总耗时</span>
+                <strong>{{ historyDetail.duration }}s</strong>
+              </div>
+            </div>
+
+            <p class="summary-text">{{ historyDetail.result?.summary ?? '该任务暂无摘要。' }}</p>
+
+            <div class="mini-grid">
+              <div>
+                <span class="mini-label">Session</span>
+                <code>{{ historyDetail.sessionId }}</code>
+              </div>
+              <div>
+                <span class="mini-label">开始</span>
+                <strong>{{ formatDateTime(historyDetail.startedAt) }}</strong>
+              </div>
+              <div>
+                <span class="mini-label">完成</span>
+                <strong>{{ formatDateTime(historyDetail.completedAt) }}</strong>
+              </div>
+            </div>
+          </div>
+
+          <section class="info-block">
+            <div class="block-head">
+              <h3>执行链</h3>
+              <span>{{ historyDetail.executors.length }} 个节点</span>
+            </div>
+
+            <div class="executor-list">
+              <article
+                v-for="executor in historyDetail.executors"
+                :key="`${executor.executorName}-${executor.startedAt}`"
+                class="executor-card"
+              >
+                <div class="timeline-top">
+                  <strong>{{ executor.executorName }}</strong>
+                  <span class="status-chip" :data-tone="statusTone(executor.status)">{{ executor.status }}</span>
+                </div>
+                <p>{{ formatDateTime(executor.startedAt) }} → {{ formatDateTime(executor.completedAt) }}</p>
+                <small>{{ executor.duration }}s</small>
+              </article>
+            </div>
+          </section>
+        </template>
+      </main>
+    </section>
+
+    <section v-else class="workspace-grid replay-grid">
+      <aside class="panel review-queue">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Replay</p>
+            <h2>回放控制</h2>
+          </div>
+        </div>
+
+        <div class="replay-controls">
+          <button class="ghost-button" type="button" @click="toggleReplayPlayback">
+            {{ replayPlaying ? '暂停' : '播放' }}
+          </button>
+          <button class="ghost-button" type="button" @click="stepReplay(-1)">上一步</button>
+          <button class="ghost-button" type="button" @click="stepReplay(1)">下一步</button>
+        </div>
+
+        <div class="speed-row">
+          <button
+            v-for="speed in [1, 2, 4]"
+            :key="speed"
+            class="view-tab compact"
+            :class="{ active: replaySpeed === speed }"
+            type="button"
+            @click="setReplaySpeed(speed)"
+          >
+            {{ speed }}x
+          </button>
+        </div>
+
+        <div class="panel-note">
+          <p>当前 Session</p>
+          <strong>{{ replaySessionId || historyDetail?.sessionId || '尚未选择' }}</strong>
+        </div>
+
+        <div v-if="currentReplayEvent" class="summary-card compact-card">
+          <div class="timeline-top">
+            <strong>{{ currentReplayEvent.eventType }}</strong>
+            <span>#{{ currentReplayEvent.sequence ?? '—' }}</span>
+          </div>
+          <p>{{ formatDateTime(currentReplayEvent.timestamp) }}</p>
+          <pre>{{ JSON.stringify(currentReplayEvent.payload, null, 2) }}</pre>
+        </div>
+      </aside>
+
+      <main class="panel review-detail">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Timeline</p>
+            <h2>事件时间线</h2>
+          </div>
+          <span class="panel-kicker">{{ replayEvents.length }} 条事件</span>
+        </div>
+
+        <div v-if="replayEvents.length === 0" class="empty-state">
+          先从历史任务里打开一条回放，或者在审核工作台中选中一个已有事件流的 session。
+        </div>
+
+        <div v-else class="timeline-list replay-list">
+          <article
+            v-for="(event, index) in replayEvents"
+            :key="`${event.sequence ?? event.timestamp}-${event.eventType}`"
+            class="timeline-item"
+            :class="{ active: index === replayIndex }"
+            @click="replayIndex = index"
+          >
+            <div class="timeline-top">
+              <strong>{{ event.eventType }}</strong>
+              <span>#{{ event.sequence ?? '—' }}</span>
+            </div>
+            <p>{{ formatDateTime(event.timestamp) }}</p>
+            <small>{{ event.sessionId }}</small>
+          </article>
+        </div>
+      </main>
     </section>
   </div>
 </template>
