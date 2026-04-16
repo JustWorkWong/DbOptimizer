@@ -173,3 +173,54 @@ internal sealed class ConfigCollectionMcpServerOptions
 
     public string Arguments { get; set; } = string.Empty;
 }
+
+/// <summary>
+/// 配置优化建议
+/// </summary>
+internal sealed record ConfigRecommendation
+{
+    /// <summary>
+    /// 参数名称
+    /// </summary>
+    public required string ParameterName { get; init; }
+
+    /// <summary>
+    /// 当前值
+    /// </summary>
+    public required string CurrentValue { get; init; }
+
+    /// <summary>
+    /// 推荐值
+    /// </summary>
+    public required string RecommendedValue { get; init; }
+
+    /// <summary>
+    /// 推荐理由
+    /// </summary>
+    public required string Reasoning { get; init; }
+
+    /// <summary>
+    /// 置信度（0.0-1.0）
+    /// </summary>
+    public required double Confidence { get; init; }
+
+    /// <summary>
+    /// 影响级别（High/Medium/Low）
+    /// </summary>
+    public required string Impact { get; init; }
+
+    /// <summary>
+    /// 是否需要重启数据库
+    /// </summary>
+    public bool RequiresRestart { get; init; }
+
+    /// <summary>
+    /// 证据引用
+    /// </summary>
+    public IReadOnlyList<string> EvidenceRefs { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// 规则名称
+    /// </summary>
+    public string RuleName { get; init; } = string.Empty;
+}
