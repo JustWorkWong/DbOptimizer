@@ -151,6 +151,29 @@ app.MapGet("/health", (MigrationReadinessState readinessState) =>
         ? Results.Ok(payload)
         : Results.Json(payload, statusCode: StatusCodes.Status503ServiceUnavailable);
 });
+
+app.MapGet("/debug/connections", (IConfiguration config) =>
+{
+    return Results.Ok(new
+    {
+        postgres = MaskPassword(config.GetConnectionString("dboptimizer-postgres")),
+        mysql = MaskPassword(config.GetConnectionString("dboptimizer-mysql")),
+        redis = MaskPassword(config.GetConnectionString("redis")),
+        postgresResolved = MaskPassword(postgreSqlConnectionString),
+        redisResolved = MaskPassword(redisConnectionString)
+    });
+
+    static string? MaskPassword(string? connStr)
+    {
+        if (string.IsNullOrWhiteSpace(connStr)) return connStr;
+        return System.Text.RegularExpressions.Regex.Replace(
+            connStr,
+            @"(password|pwd)=([^;]+)",
+            "$1=***",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+});
+
 app.MapWorkflowApi();
 app.MapReviewApi();
 app.MapDashboardAndHistoryApi();
