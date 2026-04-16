@@ -23,4 +23,7 @@ internal static class WorkflowContextKeys
     public const string DatabaseDialect = "DatabaseDialect";
     public const string DatabaseType = "DatabaseType";
     public const string DbType = "DbType";
+    public const string ConfigSnapshot = "ConfigSnapshot";
+    public const string ConfigRecommendations = "ConfigRecommendations";
+    public const string ConfigOptimizationReport = "ConfigOptimizationReport";
 }

@@ -5,7 +5,8 @@
       "Bash(cp ~/.claude/memory/tool_error_prevention.md ~/.claude/skills/troubleshooting/error-prevention.md)",
       "Bash(bash *)",
       "*",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(wc -l /e/wfcodes/DbOptimizer/src/DbOptimizer.API/Workflows/*.cs.)"
     ]
   }
 }
