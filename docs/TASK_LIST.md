@@ -23,6 +23,7 @@
 - [x] M3-01 Workflow 基础框架（已补齐 WorkflowContext、状态机、事件发布与串行运行器）
 - [x] M3-02 SqlParserExecutor（已补齐轻量 SQL 解析器、结构化 ParsedSql 输出与上下文写回）
 - [x] M3-03 ExecutionPlanExecutor（已补齐 explain 获取、基础瓶颈分析与 ExecutionPlan 上下文落盘）
+- [x] M3-04 IndexAdvisorExecutor（已补齐已有索引读取、规则式索引建议生成与 IndexRecommendations 落盘）
 
 ---
 
@@ -88,7 +89,7 @@
 11. **M3-03 ExecutionPlanExecutor** [x]
     - 内容：通过 MCP 获取执行计划并分析性能瓶颈
     - 依赖：M2-01、M3-02
-12. **M3-04 IndexAdvisorExecutor**
+12. **M3-04 IndexAdvisorExecutor** [x]
     - 内容：生成索引建议（DDL、预估收益、证据引用）
     - 依赖：M3-03
 13. **M3-05 CoordinatorExecutor**
