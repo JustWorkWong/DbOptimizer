@@ -12,6 +12,7 @@ runtimeOptions = ResolveAiApiKeyFromEnvironment(runtimeOptions);
 ValidateRuntimeOptions(runtimeOptions, builder.Environment);
 
 builder.Services.AddSingleton(runtimeOptions);
+builder.Services.AddSingleton<IDatabaseMcpFallbackExecutor, DatabaseMcpFallbackExecutor>();
 builder.Services.AddSingleton<MySqlMcpClient>();
 builder.Services.AddSingleton<PostgreSqlMcpClient>();
 builder.Services.AddSingleton<IMcpClientFactory, McpClientFactory>();
@@ -84,6 +85,11 @@ static void ValidateRuntimeOptions(RuntimeOptions options, IHostEnvironment host
         throw new InvalidOperationException("DbOptimizer:Mcp:RetryCount must be >= 0");
     }
 
+    if (options.Mcp.RetryDelayMilliseconds < 0)
+    {
+        throw new InvalidOperationException("DbOptimizer:Mcp:RetryDelayMilliseconds must be >= 0");
+    }
+
     if (options.Workflow.StepTimeoutSeconds <= 0)
     {
         throw new InvalidOperationException("DbOptimizer:Workflow:StepTimeoutSeconds must be > 0");
@@ -154,6 +160,12 @@ public sealed record McpOptions
     public int TimeoutSeconds { get; init; }
 
     public int RetryCount { get; init; }
+
+    public int RetryDelayMilliseconds { get; init; } = 1_000;
+
+    public bool EnableDirectDbFallback { get; init; } = true;
+
+    public bool EnableAuditLogging { get; init; } = true;
 }
 
 public sealed record McpServerOptions

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using ModelContextProtocol.Client;
 
@@ -14,6 +15,8 @@ namespace DbOptimizer.AgentRuntime;
 internal class DatabaseMcpClient(
     DatabaseEngine databaseEngine,
     McpServerOptions serverOptions,
+    McpOptions mcpOptions,
+    IDatabaseMcpFallbackExecutor fallbackExecutor,
     ILogger<DatabaseMcpClient> logger) : IDatabaseMcpClient, IAsyncDisposable
 {
     private static readonly IReadOnlyDictionary<McpToolKind, string[]> ToolAliases = new Dictionary<McpToolKind, string[]>
@@ -104,25 +107,128 @@ internal class DatabaseMcpClient(
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        EnsureEnabled();
 
-        var client = await GetClientAsync(cancellationToken);
-        var toolName = await ResolveToolNameAsync(client, toolKind, cancellationToken);
-        logger.LogInformation(
-            "Calling MCP tool {ToolName} for database {DatabaseEngine}.",
-            toolName,
-            databaseEngine);
-
-        var result = await client.CallToolAsync(toolName, arguments, cancellationToken: cancellationToken);
-        return McpToolInvocationResult.FromCallResult(toolName, result);
-    }
-
-    private void EnsureEnabled()
-    {
         if (!serverOptions.Enabled)
         {
-            throw new InvalidOperationException($"MCP client for {databaseEngine} is disabled by configuration.");
+            if (!mcpOptions.EnableDirectDbFallback)
+            {
+                throw new InvalidOperationException($"MCP client for {databaseEngine} is disabled and direct fallback is disabled.");
+            }
+
+            return await ExecuteFallbackAsync(
+                toolKind,
+                arguments,
+                attemptCount: 0,
+                diagnosticTag: "mcp_disabled",
+                cancellationToken);
         }
+
+        var attemptCount = 0;
+        Exception? lastException = null;
+        string? lastDiagnosticTag = null;
+
+        while (attemptCount <= mcpOptions.RetryCount)
+        {
+            attemptCount++;
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(mcpOptions.TimeoutSeconds));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+            var stopwatch = Stopwatch.StartNew();
+
+            try
+            {
+                var client = await GetClientAsync(linkedCts.Token);
+                var toolName = await ResolveToolNameAsync(client, toolKind, linkedCts.Token);
+
+                logger.LogInformation(
+                    "Calling MCP tool {ToolName} for database {DatabaseEngine}. Attempt={Attempt}.",
+                    toolName,
+                    databaseEngine,
+                    attemptCount);
+
+                var result = await client.CallToolAsync(toolName, arguments, cancellationToken: linkedCts.Token);
+                var invocationResult = McpToolInvocationResult.FromCallResult(
+                    toolName,
+                    result,
+                    attemptCount,
+                    elapsedMs: stopwatch.ElapsedMilliseconds);
+
+                WriteAuditLog(
+                    "mcp_call_succeeded",
+                    toolKind,
+                    invocationResult.AttemptCount,
+                    invocationResult.UsedFallback,
+                    invocationResult.DiagnosticTag);
+
+                return invocationResult;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                logger.LogInformation(
+                    "MCP call canceled by caller for {DatabaseEngine}/{ToolKind}.",
+                    databaseEngine,
+                    toolKind);
+                throw;
+            }
+            catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested)
+            {
+                lastException = ex;
+                lastDiagnosticTag = "mcp_timeout";
+
+                logger.LogWarning(
+                    ex,
+                    "MCP timeout for {DatabaseEngine}/{ToolKind}. Attempt={Attempt}/{MaxAttempts}.",
+                    databaseEngine,
+                    toolKind,
+                    attemptCount,
+                    mcpOptions.RetryCount + 1);
+            }
+            catch (Exception ex) when (!IsPermissionError(ex))
+            {
+                lastException = ex;
+                lastDiagnosticTag = IsDeterministicFailure(ex) ? "mcp_deterministic_error" : "mcp_error";
+
+                logger.LogWarning(
+                    ex,
+                    "MCP call failed for {DatabaseEngine}/{ToolKind}. Attempt={Attempt}/{MaxAttempts}.",
+                    databaseEngine,
+                    toolKind,
+                    attemptCount,
+                    mcpOptions.RetryCount + 1);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(
+                    ex,
+                    "MCP permission-like failure for {DatabaseEngine}/{ToolKind}. Fallback is blocked.",
+                    databaseEngine,
+                    toolKind);
+                throw;
+            }
+
+            if (lastException is not null && IsDeterministicFailure(lastException))
+            {
+                break;
+            }
+
+            if (attemptCount <= mcpOptions.RetryCount)
+            {
+                await DelayBeforeRetryAsync(attemptCount, cancellationToken);
+            }
+        }
+
+        if (!mcpOptions.EnableDirectDbFallback)
+        {
+            throw new InvalidOperationException(
+                $"MCP call failed for {databaseEngine}/{toolKind} and direct fallback is disabled.",
+                lastException);
+        }
+
+        return await ExecuteFallbackAsync(
+            toolKind,
+            arguments,
+            attemptCount,
+            lastDiagnosticTag ?? "mcp_failure",
+            cancellationToken);
     }
 
     private async Task<McpClient> GetClientAsync(CancellationToken cancellationToken)
@@ -154,8 +260,7 @@ internal class DatabaseMcpClient(
     {
         if (!serverOptions.Transport.Equals("stdio", StringComparison.OrdinalIgnoreCase))
         {
-            throw new NotSupportedException(
-                $"Transport '{serverOptions.Transport}' is not supported yet. M2-01 currently implements stdio MCP transport.");
+            throw new NotSupportedException($"Transport '{serverOptions.Transport}' is not supported yet.");
         }
 
         return new StdioClientTransport(new StdioClientTransportOptions
@@ -189,6 +294,83 @@ internal class DatabaseMcpClient(
 
         throw new InvalidOperationException(
             $"No MCP tool alias matched for {databaseEngine}/{toolKind}. Available tools: {string.Join(", ", availableTools.OrderBy(name => name))}");
+    }
+
+    private async Task DelayBeforeRetryAsync(int attemptCount, CancellationToken cancellationToken)
+    {
+        if (mcpOptions.RetryDelayMilliseconds <= 0)
+        {
+            return;
+        }
+
+        var delayMilliseconds = checked(mcpOptions.RetryDelayMilliseconds * (int)Math.Pow(2, attemptCount - 1));
+        await Task.Delay(TimeSpan.FromMilliseconds(delayMilliseconds), cancellationToken);
+    }
+
+    private async Task<McpToolInvocationResult> ExecuteFallbackAsync(
+        McpToolKind toolKind,
+        Dictionary<string, object?> arguments,
+        int attemptCount,
+        string diagnosticTag,
+        CancellationToken cancellationToken)
+    {
+        var fallbackResult = await fallbackExecutor.ExecuteAsync(
+            databaseEngine,
+            toolKind,
+            arguments,
+            attemptCount,
+            diagnosticTag,
+            cancellationToken);
+
+        WriteAuditLog(
+            "mcp_call_fallback",
+            toolKind,
+            fallbackResult.AttemptCount,
+            fallbackResult.UsedFallback,
+            fallbackResult.DiagnosticTag);
+
+        return fallbackResult;
+    }
+
+    private void WriteAuditLog(
+        string eventName,
+        McpToolKind toolKind,
+        int attemptCount,
+        bool usedFallback,
+        string? diagnosticTag)
+    {
+        if (!mcpOptions.EnableAuditLogging)
+        {
+            return;
+        }
+
+        logger.LogInformation(
+            "MCP audit event {EventName}. DatabaseEngine={DatabaseEngine}, ToolKind={ToolKind}, AttemptCount={AttemptCount}, UsedFallback={UsedFallback}, DiagnosticTag={DiagnosticTag}.",
+            eventName,
+            databaseEngine,
+            toolKind,
+            attemptCount,
+            usedFallback,
+            diagnosticTag ?? "-");
+    }
+
+    private static bool IsPermissionError(Exception exception)
+    {
+        var message = exception.Message;
+        return message.Contains("permission", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("access denied", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsDeterministicFailure(Exception exception)
+    {
+        if (exception is NotSupportedException)
+        {
+            return true;
+        }
+
+        return exception is InvalidOperationException invalidOperationException
+            && invalidOperationException.Message.Contains("No MCP tool alias matched", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string[] ParseArguments(string rawArguments)

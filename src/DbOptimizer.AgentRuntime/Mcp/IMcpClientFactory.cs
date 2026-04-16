@@ -33,9 +33,18 @@ internal sealed record McpToolInvocationResult(
     string ToolName,
     IReadOnlyList<string> TextBlocks,
     string RawText,
-    bool IsError)
+    bool IsError,
+    bool UsedFallback,
+    int AttemptCount,
+    string? DiagnosticTag,
+    long ElapsedMs)
 {
-    public static McpToolInvocationResult FromCallResult(string toolName, CallToolResult result)
+    public static McpToolInvocationResult FromCallResult(
+        string toolName,
+        CallToolResult result,
+        int attemptCount,
+        string? diagnosticTag = null,
+        long elapsedMs = 0)
     {
         var textBlocks = result.Content
             .OfType<TextContentBlock>()
@@ -47,6 +56,36 @@ internal sealed record McpToolInvocationResult(
             ? string.Join(Environment.NewLine, textBlocks)
             : System.Text.Json.JsonSerializer.Serialize(result.Content);
 
-        return new McpToolInvocationResult(toolName, textBlocks, rawText, result.IsError ?? false);
+        return new McpToolInvocationResult(
+            toolName,
+            textBlocks,
+            rawText,
+            result.IsError ?? false,
+            UsedFallback: false,
+            AttemptCount: attemptCount,
+            DiagnosticTag: diagnosticTag,
+            ElapsedMs: elapsedMs);
+    }
+
+    public static McpToolInvocationResult FromFallback(
+        string toolName,
+        string rawText,
+        int attemptCount,
+        string diagnosticTag,
+        long elapsedMs)
+    {
+        var textBlocks = string.IsNullOrWhiteSpace(rawText)
+            ? Array.Empty<string>()
+            : [rawText];
+
+        return new McpToolInvocationResult(
+            toolName,
+            textBlocks,
+            rawText,
+            IsError: false,
+            UsedFallback: true,
+            AttemptCount: attemptCount,
+            DiagnosticTag: diagnosticTag,
+            ElapsedMs: elapsedMs);
     }
 }
