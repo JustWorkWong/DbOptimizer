@@ -273,43 +273,49 @@ internal sealed class ReviewApplicationService(
         switch (normalizedAction)
         {
             case "approve":
-                await CompleteWorkflowReviewAsync(
+            {
+                var updatedCheckpoint = BuildCompletedCheckpoint(
                     checkpoint,
                     reviewStatus: "Approved",
                     comment: request.Comment,
-                    adjustments: request.Adjustments,
-                    workflowEventPublisher,
-                    cancellationToken);
+                    adjustments: request.Adjustments);
+                await PersistReviewAndCheckpointAsync(dbContext, reviewTask, updatedCheckpoint, cancellationToken);
+                await checkpointStorage.SaveCheckpointAsync(updatedCheckpoint, cancellationToken);
+                await checkpointStorage.DeleteCheckpointAsync(checkpoint.SessionId, cancellationToken);
+                await PublishCompletedWorkflowEventAsync(updatedCheckpoint, workflowEventPublisher, cancellationToken);
                 break;
+            }
             case "adjust":
-                await CompleteWorkflowReviewAsync(
+            {
+                var updatedCheckpoint = BuildCompletedCheckpoint(
                     checkpoint,
                     reviewStatus: "Adjusted",
                     comment: request.Comment,
-                    adjustments: request.Adjustments,
-                    workflowEventPublisher,
-                    cancellationToken);
+                    adjustments: request.Adjustments);
+                await PersistReviewAndCheckpointAsync(dbContext, reviewTask, updatedCheckpoint, cancellationToken);
+                await checkpointStorage.SaveCheckpointAsync(updatedCheckpoint, cancellationToken);
+                await checkpointStorage.DeleteCheckpointAsync(checkpoint.SessionId, cancellationToken);
+                await PublishCompletedWorkflowEventAsync(updatedCheckpoint, workflowEventPublisher, cancellationToken);
                 break;
+            }
             case "reject":
             {
                 var updatedCheckpoint = BuildRejectedCheckpoint(checkpoint, request.Comment!, request.Adjustments);
+                await PersistReviewAndCheckpointAsync(dbContext, reviewTask, updatedCheckpoint, cancellationToken);
                 await checkpointStorage.SaveCheckpointAsync(updatedCheckpoint, cancellationToken);
                 await workflowExecutionScheduler.ResumeAsync(updatedCheckpoint, cancellationToken);
                 break;
             }
         }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
         return new ReviewSubmitResponse(taskId, reviewTask.Status, reviewedAt);
     }
 
-    private async Task CompleteWorkflowReviewAsync(
+    private static WorkflowCheckpoint BuildCompletedCheckpoint(
         WorkflowCheckpoint checkpoint,
         string reviewStatus,
         string? comment,
-        Dictionary<string, JsonElement>? adjustments,
-        IWorkflowEventPublisher workflowEventPublisher,
-        CancellationToken cancellationToken)
+        Dictionary<string, JsonElement>? adjustments)
     {
         var context = WorkflowContext.FromCheckpoint(checkpoint);
         context.Set(WorkflowContextKeys.ReviewStatus, reviewStatus);
@@ -345,9 +351,7 @@ internal sealed class ReviewApplicationService(
             });
         var trackedEvent = WorkflowTimeline.Append(context, workflowCompletedEvent);
         context.AdvanceCheckpointVersion();
-        await checkpointStorage.SaveCheckpointAsync(context.CreateCheckpointSnapshot(), cancellationToken);
-        await checkpointStorage.DeleteCheckpointAsync(checkpoint.SessionId, cancellationToken);
-        await workflowEventPublisher.PublishAsync(workflowCompletedEvent with { Sequence = trackedEvent.Sequence }, cancellationToken);
+        return context.CreateCheckpointSnapshot();
     }
 
     private static WorkflowCheckpoint BuildRejectedCheckpoint(
@@ -366,6 +370,61 @@ internal sealed class ReviewApplicationService(
 
         context.AdvanceCheckpointVersion();
         return context.CreateCheckpointSnapshot();
+    }
+
+    private async Task PersistReviewAndCheckpointAsync(
+        DbOptimizerDbContext dbContext,
+        ReviewTaskEntity reviewTask,
+        WorkflowCheckpoint checkpoint,
+        CancellationToken cancellationToken)
+    {
+        var workflowSession = await dbContext.WorkflowSessions
+            .SingleOrDefaultAsync(item => item.SessionId == reviewTask.SessionId, cancellationToken);
+
+        if (workflowSession is null)
+        {
+            throw new ApiException(
+                StatusCodes.Status404NotFound,
+                "WORKFLOW_NOT_FOUND",
+                "Workflow session not found.",
+                new { sessionId = reviewTask.SessionId });
+        }
+
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        workflowSession.WorkflowType = checkpoint.WorkflowType;
+        workflowSession.Status = checkpoint.Status.ToString();
+        workflowSession.State = JsonSerializer.Serialize(checkpoint, WorkflowCheckpointJson.SerializerOptions);
+        workflowSession.UpdatedAt = checkpoint.UpdatedAt;
+        workflowSession.CompletedAt = checkpoint.Status is WorkflowCheckpointStatus.Completed or WorkflowCheckpointStatus.Failed or WorkflowCheckpointStatus.Cancelled
+            ? checkpoint.UpdatedAt
+            : null;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task PublishCompletedWorkflowEventAsync(
+        WorkflowCheckpoint checkpoint,
+        IWorkflowEventPublisher workflowEventPublisher,
+        CancellationToken cancellationToken)
+    {
+        var completedEvent = WorkflowTimeline.GetEvents(checkpoint)
+            .LastOrDefault(item => item.EventType == WorkflowEventType.WorkflowCompleted);
+
+        if (completedEvent is null)
+        {
+            return;
+        }
+
+        await workflowEventPublisher.PublishAsync(
+            new WorkflowEventMessage(
+                completedEvent.EventType,
+                completedEvent.SessionId,
+                completedEvent.WorkflowType,
+                completedEvent.Timestamp,
+                completedEvent.Payload,
+                completedEvent.Sequence),
+            cancellationToken);
     }
 
     private static OptimizationReport ApplyAdjustments(

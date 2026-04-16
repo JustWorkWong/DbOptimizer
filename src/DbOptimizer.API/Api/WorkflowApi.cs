@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using DbOptimizer.API.Checkpointing;
+using DbOptimizer.API.Persistence;
 using DbOptimizer.API.Workflows;
+using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.API.Api;
 
@@ -160,6 +162,8 @@ internal interface IWorkflowQueryService
 internal sealed class WorkflowExecutionScheduler(
     IWorkflowRunner workflowRunner,
     ICheckpointStorage checkpointStorage,
+    IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
+    IWorkflowEventPublisher workflowEventPublisher,
     IEnumerable<IWorkflowExecutor> workflowExecutors,
     ILogger<WorkflowExecutionScheduler> logger) : IWorkflowExecutionScheduler
 {
@@ -233,8 +237,19 @@ internal sealed class WorkflowExecutionScheduler(
         var context = WorkflowContext.FromCheckpoint(checkpoint);
         context.Set("LastError", "Workflow cancelled by user.");
         context.ApplyStatus(WorkflowCheckpointStatus.Cancelled);
+        var cancelEvent = new WorkflowEventMessage(
+            WorkflowEventType.WorkflowCancelled,
+            context.SessionId,
+            context.WorkflowType,
+            DateTimeOffset.UtcNow,
+            new { reason = "CancelledByUser" });
+        var trackedCancelEvent = WorkflowTimeline.Append(context, cancelEvent);
         context.AdvanceCheckpointVersion();
-        await checkpointStorage.SaveCheckpointAsync(context.CreateCheckpointSnapshot(), cancellationToken);
+        var updatedCheckpoint = context.CreateCheckpointSnapshot();
+
+        await PersistCancellationAsync(updatedCheckpoint, cancellationToken);
+        await checkpointStorage.SaveCheckpointAsync(updatedCheckpoint, cancellationToken);
+        await workflowEventPublisher.PublishAsync(cancelEvent with { Sequence = trackedCancelEvent.Sequence }, cancellationToken);
 
         if (_runningSessions.TryGetValue(sessionId, out var cancellationSource))
         {
@@ -242,6 +257,44 @@ internal sealed class WorkflowExecutionScheduler(
         }
 
         return new WorkflowCancelResponse(sessionId, WorkflowCheckpointStatus.Cancelled.ToString());
+    }
+
+    private async Task PersistCancellationAsync(WorkflowCheckpoint checkpoint, CancellationToken cancellationToken)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var workflowSession = await dbContext.WorkflowSessions
+            .SingleOrDefaultAsync(item => item.SessionId == checkpoint.SessionId, cancellationToken);
+
+        if (workflowSession is null)
+        {
+            throw new ApiException(
+                StatusCodes.Status404NotFound,
+                "WORKFLOW_NOT_FOUND",
+                "Workflow session not found.",
+                new { sessionId = checkpoint.SessionId });
+        }
+
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        workflowSession.WorkflowType = checkpoint.WorkflowType;
+        workflowSession.Status = checkpoint.Status.ToString();
+        workflowSession.State = JsonSerializer.Serialize(checkpoint, WorkflowCheckpointJson.SerializerOptions);
+        workflowSession.UpdatedAt = checkpoint.UpdatedAt;
+        workflowSession.CompletedAt = checkpoint.UpdatedAt;
+
+        var pendingReviews = await dbContext.ReviewTasks
+            .Where(item => item.SessionId == checkpoint.SessionId && item.Status == "Pending")
+            .ToListAsync(cancellationToken);
+
+        foreach (var reviewTask in pendingReviews)
+        {
+            reviewTask.Status = "Cancelled";
+            reviewTask.ReviewerComment = "Workflow cancelled by user.";
+            reviewTask.ReviewedAt = checkpoint.UpdatedAt;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<WorkflowResumeResponse> ResumeAsync(Guid sessionId, CancellationToken cancellationToken = default)

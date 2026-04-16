@@ -160,7 +160,17 @@ internal sealed class WorkflowRunner(
                 }
 
                 context.Set("LastError", "Workflow cancelled.");
-                await SaveCheckpointAndPublishAsync(context, cancellationToken);
+                if (!WorkflowTimeline.GetEvents(context).Any(item => item.EventType == WorkflowEventType.WorkflowCancelled))
+                {
+                    await PublishTrackedEventAsync(
+                        context,
+                        WorkflowEventType.WorkflowCancelled,
+                        DateTimeOffset.UtcNow,
+                        new { reason = "CancellationTokenTriggered", executorName = executor.Name },
+                        CancellationToken.None);
+                }
+
+                await SaveCheckpointAndPublishAsync(context, CancellationToken.None);
                 return BuildResult(context, "Workflow cancelled.");
             }
             catch (Exception ex)
