@@ -1,3 +1,7 @@
+using DbOptimizer.API.DatabaseMigrations;
+using DbOptimizer.API.Persistence;
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Logging.Configure(options =>
@@ -8,44 +12,74 @@ builder.Logging.Configure(options =>
         ActivityTrackingOptions.ParentId;
 });
 
+/* =========================
+ * EF Core 迁移启动注册
+ * - 启动时执行 Database.MigrateAsync()
+ * - 迁移成功后再标记健康就绪
+ * ========================= */
+builder.Services.AddDbContext<DbOptimizerDbContext>(options =>
+    options.UseNpgsql(ResolvePostgreSqlConnectionString(builder.Configuration)));
+builder.Services.AddSingleton<MigrationReadinessState>();
+builder.Services.AddHostedService<EfMigrationHostedService>();
+
 var app = builder.Build();
 
 app.Use(async (context, next) =>
 {
-    var sessionId = context.Request.Headers.TryGetValue("X-Session-Id", out var sessionValues)
-        ? sessionValues.ToString()
-        : "-";
-    var executionId = context.Request.Headers.TryGetValue("X-Execution-Id", out var executionValues)
-        ? executionValues.ToString()
-        : "-";
+    var sessionId = GetHeaderValue(context, "X-Session-Id");
+    var executionId = GetHeaderValue(context, "X-Execution-Id");
 
     using (app.Logger.BeginScope(new Dictionary<string, object>
     {
         ["requestId"] = context.TraceIdentifier,
-        ["sessionId"] = string.IsNullOrWhiteSpace(sessionId) ? "-" : sessionId,
-        ["executionId"] = string.IsNullOrWhiteSpace(executionId) ? "-" : executionId
+        ["sessionId"] = sessionId,
+        ["executionId"] = executionId
     }))
     {
         await next();
     }
 });
 
-app.MapGet("/health", (HttpContext context) =>
+app.MapGet("/health", (MigrationReadinessState readinessState) =>
 {
-    var sessionId = context.Request.Headers.TryGetValue("X-Session-Id", out var sessionValues)
-        ? sessionValues.ToString()
-        : "-";
-    var executionId = context.Request.Headers.TryGetValue("X-Execution-Id", out var executionValues)
-        ? executionValues.ToString()
-        : "-";
-
-    return Results.Ok(new
+    var payload = new
     {
-        status = "ok",
-        requestId = context.TraceIdentifier,
-        sessionId = string.IsNullOrWhiteSpace(sessionId) ? "-" : sessionId,
-        executionId = string.IsNullOrWhiteSpace(executionId) ? "-" : executionId
-    });
+        status = readinessState.IsReady ? "ok" : "not_ready"
+    };
+
+    return readinessState.IsReady
+        ? Results.Ok(payload)
+        : Results.Json(payload, statusCode: StatusCodes.Status503ServiceUnavailable);
 });
 
 app.Run();
+
+return;
+
+static string GetHeaderValue(HttpContext context, string headerName)
+{
+    if (!context.Request.Headers.TryGetValue(headerName, out var values))
+    {
+        return "-";
+    }
+
+    var value = values.ToString();
+    return string.IsNullOrWhiteSpace(value) ? "-" : value;
+}
+
+static string ResolvePostgreSqlConnectionString(IConfiguration configuration)
+{
+    var fromAspire = configuration.GetConnectionString("dboptimizer-postgres");
+    if (!string.IsNullOrWhiteSpace(fromAspire))
+    {
+        return fromAspire;
+    }
+
+    var fallback = configuration.GetConnectionString("PostgreSql");
+    if (!string.IsNullOrWhiteSpace(fallback))
+    {
+        return fallback;
+    }
+
+    throw new InvalidOperationException("Missing PostgreSQL connection string: ConnectionStrings:dboptimizer-postgres or ConnectionStrings:PostgreSql");
+}

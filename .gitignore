@@ -45,3 +45,8 @@ bld/
 ## Local secret overrides
 src/DbOptimizer.AgentRuntime/appsettings.Local.json
 src/DbOptimizer.AppHost/appsettings.Local.json
+
+## Local agent artifacts
+.claude/tmp/
+.claude/worktrees/
+*.stackdump
