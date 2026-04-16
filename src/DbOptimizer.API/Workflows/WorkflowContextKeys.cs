@@ -6,6 +6,9 @@ namespace DbOptimizer.API.Workflows;
  * ========================= */
 internal static class WorkflowContextKeys
 {
+    public const string DatabaseId = "DatabaseId";
+    public const string WorkflowTimeline = "WorkflowTimeline";
+    public const string WorkflowTimelineNextSequence = "WorkflowTimelineNextSequence";
     public const string SqlText = "SqlText";
     public const string Sql = "Sql";
     public const string SqlParserInput = "SqlParserInput";
