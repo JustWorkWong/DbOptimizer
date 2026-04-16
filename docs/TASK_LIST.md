@@ -26,6 +26,7 @@
 - [x] M3-04 IndexAdvisorExecutor（已补齐已有索引读取、规则式索引建议生成与 IndexRecommendations 落盘）
 - [x] M3-05 CoordinatorExecutor（已补齐最终汇总报告、证据链与置信度收口）
 - [x] M3-06 HumanReviewExecutor（已补齐 review_tasks 持久化、ReviewId 落盘与 WaitingForReview 挂起）
+- [x] M3-07 RegenerationExecutor（已补齐驳回原因落盘、回流计数与最大轮次控制）
 
 ---
 
@@ -100,7 +101,7 @@
 14. **M3-06 HumanReviewExecutor** [x]
     - 内容：进入待审核态，阻塞等待人工动作
     - 依赖：M3-05
-15. **M3-07 RegenerationExecutor（驳回回流）**
+15. **M3-07 RegenerationExecutor（驳回回流）** [x]
     - 内容：结合驳回意见重生成，回流次数上限从配置文件读取（默认 3 次）
     - 依赖：M3-06
 
