@@ -11,56 +11,33 @@ builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, relo
 var postgresPort = GetRequiredPort("DbOptimizer:Databases:PostgreSql:Port");
 var mySqlPort = GetRequiredPort("DbOptimizer:Databases:MySql:Port");
 var redisPort = GetRequiredPort("DbOptimizer:Databases:Redis:Port");
-const int pgAdminPort = 15050;
-const int phpMyAdminPort = 15051;
-const int redisInsightPort = 15540;
 
-var postgresUser = builder.AddParameterFromConfiguration(
-    "postgres-username",
-    "DbOptimizer:Databases:PostgreSql:Username");
-var postgresPassword = builder.AddParameterFromConfiguration(
-    "postgres-password",
-    "DbOptimizer:Databases:PostgreSql:Password",
-    secret: true);
-var mySqlPassword = builder.AddParameterFromConfiguration(
-    "mysql-password",
-    "DbOptimizer:Databases:MySql:Password",
-    secret: true);
+var postgresUsername = GetRequiredValue("DbOptimizer:Databases:PostgreSql:Username");
+var postgresPasswordValue = GetRequiredValue("DbOptimizer:Databases:PostgreSql:Password");
+var mySqlPasswordValue = GetRequiredValue("DbOptimizer:Databases:MySql:Password");
 
-var postgresInitDirectory = Path.Combine(builder.AppHostDirectory, "DatabaseInit", "postgresql");
-var mySqlInitDirectory = Path.Combine(builder.AppHostDirectory, "DatabaseInit", "mysql");
+var postgresUser = builder.AddParameter("postgres-username", postgresUsername);
+var postgresPassword = builder.AddParameter("postgres-password", postgresPasswordValue, secret: true);
+var mySqlPassword = builder.AddParameter("mysql-password", mySqlPasswordValue, secret: true);
 
 var postgres = builder.AddPostgres("postgres", userName: postgresUser, password: postgresPassword, port: postgresPort)
     .WithDataVolume()
-    .WithEnvironment("POSTGRES_PASSWORD", postgresPassword)
-    .WithInitFiles(postgresInitDirectory)
-    .WithPgAdmin(pgAdmin =>
-    {
-        pgAdmin.WithHostPort(pgAdminPort);
-    });
+    .WithEnvironment("POSTGRES_USER", postgresUsername)
+    .WithEnvironment("POSTGRES_PASSWORD", postgresPasswordValue);
 
 var postgresDatabaseName = GetRequiredValue("DbOptimizer:Databases:PostgreSql:Database");
 var postgresDb = postgres.AddDatabase("dboptimizer-postgres", postgresDatabaseName);
 
 var mySql = builder.AddMySql("mysql", password: mySqlPassword, port: mySqlPort)
     .WithDataVolume()
-    .WithEnvironment("MYSQL_ROOT_PASSWORD", mySqlPassword)
-    .WithInitFiles(mySqlInitDirectory)
-    .WithPhpMyAdmin(phpMyAdmin =>
-    {
-        phpMyAdmin.WithHostPort(phpMyAdminPort);
-    });
+    .WithEnvironment("MYSQL_ROOT_PASSWORD", mySqlPasswordValue);
 
 var mySqlDatabaseName = GetRequiredValue("DbOptimizer:Databases:MySql:Database");
 var mySqlDb = mySql.AddDatabase("dboptimizer-mysql", mySqlDatabaseName);
 
 var redis = builder.AddRedis("redis")
     .WithDataVolume()
-    .WithHostPort(redisPort)
-    .WithRedisInsight(redisInsight =>
-    {
-        redisInsight.WithHostPort(redisInsightPort);
-    });
+    .WithHostPort(redisPort);
 
 var api = builder.AddProject<Projects.DbOptimizer_API>("api")
     .WithReference(postgresDb)
