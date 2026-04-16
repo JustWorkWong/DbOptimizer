@@ -22,6 +22,7 @@
 - [x] M2-02 超时、重试、降级策略（已补齐配置驱动的 timeout/retry/fallback 与审计日志标记）
 - [x] M3-01 Workflow 基础框架（已补齐 WorkflowContext、状态机、事件发布与串行运行器）
 - [x] M3-02 SqlParserExecutor（已补齐轻量 SQL 解析器、结构化 ParsedSql 输出与上下文写回）
+- [x] M3-03 ExecutionPlanExecutor（已补齐 explain 获取、基础瓶颈分析与 ExecutionPlan 上下文落盘）
 
 ---
 
@@ -84,7 +85,7 @@
 10. **M3-02 SqlParserExecutor** [x]
     - 内容：解析 SQL（表/字段/JOIN/WHERE）并写入上下文
     - 依赖：M3-01
-11. **M3-03 ExecutionPlanExecutor**
+11. **M3-03 ExecutionPlanExecutor** [x]
     - 内容：通过 MCP 获取执行计划并分析性能瓶颈
     - 依赖：M2-01、M3-02
 12. **M3-04 IndexAdvisorExecutor**
