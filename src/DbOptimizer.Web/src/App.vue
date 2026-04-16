@@ -87,6 +87,46 @@ const progressEvents = computed(() =>
   ),
 )
 const latestProgressEvent = computed(() => progressEvents.value.at(-1) ?? null)
+const latestExecutorEvent = computed(() =>
+  [...progressEvents.value]
+    .reverse()
+    .find((item) => ['ExecutorStarted', 'ExecutorCompleted', 'ExecutorFailed'].includes(item.eventType)) ?? null,
+)
+const currentExecution = computed(() => {
+  if (!historyDetail.value?.executors.length) {
+    return null
+  }
+
+  if (workflow.value?.currentExecutor) {
+    const runningMatch = [...historyDetail.value.executors]
+      .reverse()
+      .find((item) => item.executorName === workflow.value?.currentExecutor)
+    if (runningMatch) {
+      return runningMatch
+    }
+  }
+
+  return historyDetail.value.executors.at(-1) ?? null
+})
+const liveExecutorDetails = computed<Record<string, unknown> | null>(() => {
+  const payload = latestExecutorEvent.value?.payload
+  if (!isRecord(payload)) {
+    return currentExecution.value?.outputData ?? currentExecution.value?.inputData ?? null
+  }
+
+  const details = payload.details
+  return isRecord(details)
+    ? details
+    : (currentExecution.value?.outputData ?? currentExecution.value?.inputData ?? null)
+})
+const liveExecutorTokenUsage = computed(() => {
+  const payload = latestExecutorEvent.value?.payload
+  if (isRecord(payload) && isRecord(payload.tokenUsage)) {
+    return normalizeTokenUsage(payload.tokenUsage)
+  }
+
+  return currentExecution.value?.tokenUsage ?? historyDetail.value?.tokenUsage ?? null
+})
 const workflowProgressSummary = computed(() => {
   if (workflow.value?.errorMessage) {
     return `任务失败：${workflow.value.errorMessage}`
@@ -680,6 +720,58 @@ function getPayloadValue(payload: Record<string, unknown>, key: string) {
   return payload[key]
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeTokenUsage(value: Record<string, unknown>) {
+  const prompt = typeof value.prompt === 'number' ? value.prompt : Number(value.prompt ?? 0)
+  const completion = typeof value.completion === 'number' ? value.completion : Number(value.completion ?? 0)
+  const total = typeof value.total === 'number' ? value.total : Number(value.total ?? 0)
+  const cost = typeof value.cost === 'number' ? value.cost : Number(value.cost ?? 0)
+  const source = typeof value.source === 'string' ? value.source : null
+
+  if (!Number.isFinite(prompt) || !Number.isFinite(completion) || !Number.isFinite(total) || !Number.isFinite(cost)) {
+    return null
+  }
+
+  return { prompt, completion, total, cost, source }
+}
+
+function formatJsonBlock(value: unknown) {
+  if (value === null || value === undefined) {
+    return ''
+  }
+
+  return JSON.stringify(value, null, 2)
+}
+
+function formatToolName(toolName: string) {
+  switch (toolName) {
+    case 'show_indexes':
+      return 'SHOW INDEXES'
+    default:
+      return toolName
+  }
+}
+
+function formatDecisionType(decisionType: string) {
+  switch (decisionType) {
+    case 'SqlParsing':
+      return 'SQL 解析结论'
+    case 'ExecutionPlanAnalysis':
+      return '执行计划结论'
+    case 'IndexRecommendation':
+      return '索引建议'
+    case 'OptimizationSummary':
+      return '最终摘要'
+    case 'HumanReviewPending':
+      return '待人工审核'
+    default:
+      return decisionType
+  }
+}
+
 function formatEventTitle(event: WorkflowStreamEvent) {
   const payload = event.payload ?? {}
   const executorName = getPayloadValue(payload, 'executorName')
@@ -708,6 +800,9 @@ function formatEventTitle(event: WorkflowStreamEvent) {
 
 function formatEventDescription(event: WorkflowStreamEvent) {
   const payload = event.payload ?? {}
+  const message = typeof getPayloadValue(payload, 'message') === 'string'
+    ? String(getPayloadValue(payload, 'message'))
+    : null
   const executorName = typeof getPayloadValue(payload, 'executorName') === 'string'
     ? String(getPayloadValue(payload, 'executorName'))
     : null
@@ -726,6 +821,10 @@ function formatEventDescription(event: WorkflowStreamEvent) {
   const reviewStatus = typeof getPayloadValue(payload, 'reviewStatus') === 'string'
     ? String(getPayloadValue(payload, 'reviewStatus'))
     : null
+
+  if (message && ['ExecutorStarted', 'ExecutorCompleted'].includes(event.eventType)) {
+    return message
+  }
 
   switch (event.eventType) {
     case 'WorkflowStarted':
@@ -783,6 +882,14 @@ function formatDateTime(value: string | null | undefined) {
 
 function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`
+}
+
+function formatTokenCost(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return '0.0000'
+  }
+
+  return value.toFixed(value >= 1 ? 2 : 4)
 }
 
 function getErrorText(error: unknown) {
@@ -943,7 +1050,48 @@ function getErrorText(error: unknown) {
           启动一次 SQL 分析后，这里会实时显示 workflow 状态和关键事件。
         </div>
 
-        <div v-else class="timeline-list">
+        <section v-if="workflow && latestExecutorEvent" class="info-block compact">
+          <div class="block-head">
+            <h3>当前执行内容</h3>
+            <span>{{ formatExecutorLabel(workflow?.currentExecutor ?? currentExecution?.executorName ?? null) }}</span>
+          </div>
+
+          <p class="summary-text">{{ formatEventDescription(latestExecutorEvent) }}</p>
+
+          <div v-if="liveExecutorTokenUsage" class="mini-grid">
+            <div>
+              <span class="mini-label">Prompt Tokens</span>
+              <strong>{{ liveExecutorTokenUsage.prompt }}</strong>
+            </div>
+            <div>
+              <span class="mini-label">Completion Tokens</span>
+              <strong>{{ liveExecutorTokenUsage.completion }}</strong>
+            </div>
+            <div>
+              <span class="mini-label">Total / Cost</span>
+              <strong>{{ liveExecutorTokenUsage.total }} / {{ formatTokenCost(liveExecutorTokenUsage.cost) }}</strong>
+            </div>
+          </div>
+
+          <pre v-if="liveExecutorDetails">{{ formatJsonBlock(liveExecutorDetails) }}</pre>
+
+          <div v-if="currentExecution?.toolCalls.length" class="executor-list">
+            <article
+              v-for="toolCall in currentExecution.toolCalls"
+              :key="toolCall.callId"
+              class="executor-card"
+            >
+              <div class="timeline-top">
+                <strong>{{ formatToolName(toolCall.toolName) }}</strong>
+                <span>{{ toolCall.duration }}s</span>
+              </div>
+              <p>{{ formatDateTime(toolCall.startedAt) }}</p>
+              <pre v-if="toolCall.result">{{ formatJsonBlock(toolCall.result) }}</pre>
+            </article>
+          </div>
+        </section>
+
+        <div v-if="workflow" class="timeline-list">
           <article
             v-for="event in progressEvents.slice().reverse()"
             :key="`${event.sequence ?? event.timestamp}-${event.eventType}`"
@@ -1322,6 +1470,21 @@ function getErrorText(error: unknown) {
                 <strong>{{ formatDateTime(historyDetail.completedAt) }}</strong>
               </div>
             </div>
+
+            <div v-if="historyDetail.tokenUsage" class="mini-grid">
+              <div>
+                <span class="mini-label">Prompt Tokens</span>
+                <strong>{{ historyDetail.tokenUsage.prompt }}</strong>
+              </div>
+              <div>
+                <span class="mini-label">Completion Tokens</span>
+                <strong>{{ historyDetail.tokenUsage.completion }}</strong>
+              </div>
+              <div>
+                <span class="mini-label">Total / Cost</span>
+                <strong>{{ historyDetail.tokenUsage.total }} / {{ formatTokenCost(historyDetail.tokenUsage.cost) }}</strong>
+              </div>
+            </div>
           </div>
 
           <section class="info-block">
@@ -1342,6 +1505,62 @@ function getErrorText(error: unknown) {
                 </div>
                 <p>{{ formatDateTime(executor.startedAt) }} → {{ formatDateTime(executor.completedAt) }}</p>
                 <small>{{ executor.duration }}s</small>
+
+                <div v-if="executor.tokenUsage" class="pill-row">
+                  <span class="pill">Prompt {{ executor.tokenUsage.prompt }}</span>
+                  <span class="pill">Completion {{ executor.tokenUsage.completion }}</span>
+                  <span class="pill">Total {{ executor.tokenUsage.total }}</span>
+                  <span class="pill">Cost {{ formatTokenCost(executor.tokenUsage.cost) }}</span>
+                </div>
+
+                <pre v-if="executor.inputData">{{ formatJsonBlock(executor.inputData) }}</pre>
+                <pre v-if="executor.outputData">{{ formatJsonBlock(executor.outputData) }}</pre>
+
+                <div v-if="executor.toolCalls.length" class="executor-list">
+                  <article
+                    v-for="toolCall in executor.toolCalls"
+                    :key="toolCall.callId"
+                    class="executor-card"
+                  >
+                    <div class="timeline-top">
+                      <strong>{{ formatToolName(toolCall.toolName) }}</strong>
+                      <span>{{ toolCall.duration }}s</span>
+                    </div>
+                    <small>{{ formatDateTime(toolCall.startedAt) }}</small>
+                    <pre v-if="toolCall.arguments">{{ formatJsonBlock(toolCall.arguments) }}</pre>
+                    <pre v-if="toolCall.result">{{ formatJsonBlock(toolCall.result) }}</pre>
+                  </article>
+                </div>
+
+                <div v-if="executor.decisions.length" class="evidence-list">
+                  <article
+                    v-for="decision in executor.decisions"
+                    :key="decision.decisionId"
+                    class="evidence-card"
+                  >
+                    <div class="evidence-top">
+                      <strong>{{ formatDecisionType(decision.decisionType) }}</strong>
+                      <span>{{ decision.confidence }}%</span>
+                    </div>
+                    <p>{{ decision.reasoning }}</p>
+                    <pre v-if="decision.evidence">{{ formatJsonBlock(decision.evidence) }}</pre>
+                  </article>
+                </div>
+
+                <div v-if="executor.errors.length" class="evidence-list">
+                  <article
+                    v-for="error in executor.errors"
+                    :key="error.logId"
+                    class="evidence-card"
+                  >
+                    <div class="evidence-top">
+                      <strong>{{ error.errorType }}</strong>
+                      <span>{{ formatDateTime(error.createdAt) }}</span>
+                    </div>
+                    <p>{{ error.errorMessage }}</p>
+                    <pre v-if="error.context">{{ formatJsonBlock(error.context) }}</pre>
+                  </article>
+                </div>
               </article>
             </div>
           </section>

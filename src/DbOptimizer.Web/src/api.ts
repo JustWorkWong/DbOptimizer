@@ -69,11 +69,49 @@ export interface HistoryDetail {
   completedAt: string | null
   duration: number
   executors: Array<{
+    executionId: string
     executorName: string
+    agentName: string
     status: string
     startedAt: string
     completedAt: string | null
     duration: number
+    inputData: Record<string, unknown> | null
+    outputData: Record<string, unknown> | null
+    tokenUsage: {
+      prompt: number
+      completion: number
+      total: number
+      cost: number
+      source?: string | null
+    } | null
+    toolCalls: Array<{
+      callId: string
+      toolName: string
+      status: string
+      startedAt: string
+      completedAt: string | null
+      duration: number
+      arguments: Record<string, unknown> | null
+      result: Record<string, unknown> | null
+      errorMessage: string | null
+    }>
+    decisions: Array<{
+      decisionId: string
+      decisionType: string
+      reasoning: string
+      confidence: number
+      createdAt: string
+      evidence: Record<string, unknown> | null
+    }>
+    errors: Array<{
+      logId: string
+      errorType: string
+      errorMessage: string
+      createdAt: string
+      stackTrace: string | null
+      context: Record<string, unknown> | null
+    }>
   }>
   result: OptimizationReport | null
   tokenUsage: {
@@ -81,6 +119,7 @@ export interface HistoryDetail {
     completion: number
     total: number
     cost: number
+    source?: string | null
   } | null
 }
 

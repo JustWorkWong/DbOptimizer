@@ -94,7 +94,7 @@ internal sealed class WorkflowRunner(
                 context,
                 WorkflowEventType.ExecutorStarted,
                 startedAt,
-                new { executorName = executor.Name, startedAt },
+                WorkflowEventPayloadFactory.BuildExecutorStartedPayload(context, executor.Name, startedAt),
                 cancellationToken);
 
             try
@@ -120,12 +120,18 @@ internal sealed class WorkflowRunner(
                         cancellationToken: cancellationToken);
 
                     await SaveCheckpointAndPublishAsync(context, cancellationToken);
-                    await PublishTrackedEventAsync(
+                await PublishTrackedEventAsync(
+                    context,
+                    WorkflowEventType.ExecutorFailed,
+                    completedAt,
+                    WorkflowEventPayloadFactory.BuildExecutorFailedPayload(
                         context,
-                        WorkflowEventType.ExecutorFailed,
+                        executor.Name,
+                        result.ErrorMessage ?? "Unknown workflow error.",
                         completedAt,
-                        new { executorName = executor.Name, errorMessage = result.ErrorMessage, durationMs },
-                        cancellationToken);
+                        durationMs,
+                        result.Output),
+                    cancellationToken);
                     await PublishTrackedEventAsync(
                         context,
                         WorkflowEventType.WorkflowFailed,
@@ -154,7 +160,12 @@ internal sealed class WorkflowRunner(
                     context,
                     WorkflowEventType.ExecutorCompleted,
                     completedAt,
-                    new { executorName = executor.Name, durationMs, nextStatus = result.NextStatus.ToString() },
+                    WorkflowEventPayloadFactory.BuildExecutorCompletedPayload(
+                        context,
+                        executor.Name,
+                        result,
+                        completedAt,
+                        durationMs),
                     cancellationToken);
 
                 await SaveCheckpointAndPublishAsync(context, cancellationToken);
@@ -229,7 +240,12 @@ internal sealed class WorkflowRunner(
                     context,
                     WorkflowEventType.ExecutorFailed,
                     DateTimeOffset.UtcNow,
-                    new { executorName = executor.Name, errorMessage = ex.Message },
+                    WorkflowEventPayloadFactory.BuildExecutorFailedPayload(
+                        context,
+                        executor.Name,
+                        ex.Message,
+                        DateTimeOffset.UtcNow,
+                        (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds),
                     cancellationToken);
                 await PublishTrackedEventAsync(
                     context,
