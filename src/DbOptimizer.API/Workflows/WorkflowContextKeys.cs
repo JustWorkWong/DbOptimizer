@@ -1,0 +1,16 @@
+namespace DbOptimizer.API.Workflows;
+
+/* =========================
+ * Workflow 上下文键名约定
+ * 统一常用键名，避免不同 Executor 间出现大小写和命名漂移。
+ * ========================= */
+internal static class WorkflowContextKeys
+{
+    public const string SqlText = "SqlText";
+    public const string Sql = "Sql";
+    public const string SqlParserInput = "SqlParserInput";
+    public const string ParsedSql = "ParsedSql";
+    public const string DatabaseDialect = "DatabaseDialect";
+    public const string DatabaseType = "DatabaseType";
+    public const string DbType = "DbType";
+}
