@@ -1,4 +1,5 @@
 using DbOptimizer.API.Checkpointing;
+using DbOptimizer.API.Api;
 using DbOptimizer.API.DatabaseMigrations;
 using DbOptimizer.API.Persistence;
 using DbOptimizer.API.Workflows;
@@ -39,9 +40,15 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
     return ConnectionMultiplexer.Connect(configurationOptions);
 });
 builder.Services.AddSingleton<ICheckpointStorage, PostgresRedisCheckpointStorage>();
-builder.Services.AddSingleton<IWorkflowEventPublisher, LoggingWorkflowEventPublisher>();
+builder.Services.AddSingleton<WorkflowEventHub>();
+builder.Services.AddSingleton<IWorkflowEventPublisher>(serviceProvider => serviceProvider.GetRequiredService<WorkflowEventHub>());
+builder.Services.AddSingleton<IWorkflowEventQueryService>(serviceProvider => serviceProvider.GetRequiredService<WorkflowEventHub>());
 builder.Services.AddSingleton<IWorkflowStateMachine, WorkflowStateMachine>();
 builder.Services.AddSingleton<IWorkflowRunner, WorkflowRunner>();
+builder.Services.AddSingleton<IWorkflowExecutionScheduler, WorkflowExecutionScheduler>();
+builder.Services.AddSingleton<IWorkflowQueryService, WorkflowQueryService>();
+builder.Services.AddSingleton<IReviewApplicationService, ReviewApplicationService>();
+builder.Services.AddSingleton<IHistoryQueryService, HistoryQueryService>();
 builder.Services.AddSingleton<ISqlParser, LightweightSqlParser>();
 builder.Services.AddSingleton(executionPlanOptions);
 builder.Services.AddSingleton(workflowRuntimeOptions);
@@ -90,6 +97,10 @@ app.MapGet("/health", (MigrationReadinessState readinessState) =>
         ? Results.Ok(payload)
         : Results.Json(payload, statusCode: StatusCodes.Status503ServiceUnavailable);
 });
+app.MapWorkflowApi();
+app.MapReviewApi();
+app.MapDashboardAndHistoryApi();
+app.MapWorkflowEventsApi();
 
 app.Run();
 

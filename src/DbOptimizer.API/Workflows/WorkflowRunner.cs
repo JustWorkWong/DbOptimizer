@@ -65,13 +65,11 @@ internal sealed class WorkflowRunner(
         if (!isResume)
         {
             context.ApplyStatus(WorkflowCheckpointStatus.Running);
-            await workflowEventPublisher.PublishAsync(
-                new WorkflowEventMessage(
-                    WorkflowEventType.WorkflowStarted,
-                    context.SessionId,
-                    context.WorkflowType,
-                    DateTimeOffset.UtcNow,
-                    new { isResume = false }),
+            await PublishTrackedEventAsync(
+                context,
+                WorkflowEventType.WorkflowStarted,
+                DateTimeOffset.UtcNow,
+                new { isResume = false },
                 cancellationToken);
         }
 
@@ -86,13 +84,11 @@ internal sealed class WorkflowRunner(
             context.ApplyStatus(WorkflowCheckpointStatus.Running);
 
             await SaveCheckpointAndPublishAsync(context, cancellationToken);
-            await workflowEventPublisher.PublishAsync(
-                new WorkflowEventMessage(
-                    WorkflowEventType.ExecutorStarted,
-                    context.SessionId,
-                    context.WorkflowType,
-                    startedAt,
-                    new { executorName = executor.Name, startedAt }),
+            await PublishTrackedEventAsync(
+                context,
+                WorkflowEventType.ExecutorStarted,
+                startedAt,
+                new { executorName = executor.Name, startedAt },
                 cancellationToken);
 
             try
@@ -108,21 +104,17 @@ internal sealed class WorkflowRunner(
                     context.Set("LastError", result.ErrorMessage ?? "Unknown workflow error.");
 
                     await SaveCheckpointAndPublishAsync(context, cancellationToken);
-                    await workflowEventPublisher.PublishAsync(
-                        new WorkflowEventMessage(
-                            WorkflowEventType.ExecutorFailed,
-                            context.SessionId,
-                            context.WorkflowType,
-                            completedAt,
-                            new { executorName = executor.Name, errorMessage = result.ErrorMessage, durationMs }),
+                    await PublishTrackedEventAsync(
+                        context,
+                        WorkflowEventType.ExecutorFailed,
+                        completedAt,
+                        new { executorName = executor.Name, errorMessage = result.ErrorMessage, durationMs },
                         cancellationToken);
-                    await workflowEventPublisher.PublishAsync(
-                        new WorkflowEventMessage(
-                            WorkflowEventType.WorkflowFailed,
-                            context.SessionId,
-                            context.WorkflowType,
-                            completedAt,
-                            new { executorName = executor.Name, errorMessage = result.ErrorMessage }),
+                    await PublishTrackedEventAsync(
+                        context,
+                        WorkflowEventType.WorkflowFailed,
+                        completedAt,
+                        new { executorName = executor.Name, errorMessage = result.ErrorMessage },
                         cancellationToken);
 
                     return BuildResult(context, result.ErrorMessage);
@@ -133,30 +125,43 @@ internal sealed class WorkflowRunner(
                 workflowStateMachine.EnsureCanTransition(context.Status, result.NextStatus);
                 context.ApplyStatus(result.NextStatus);
 
-                await workflowEventPublisher.PublishAsync(
-                    new WorkflowEventMessage(
-                        WorkflowEventType.ExecutorCompleted,
-                        context.SessionId,
-                        context.WorkflowType,
-                        completedAt,
-                        new { executorName = executor.Name, durationMs, nextStatus = result.NextStatus.ToString() }),
+                await PublishTrackedEventAsync(
+                    context,
+                    WorkflowEventType.ExecutorCompleted,
+                    completedAt,
+                    new { executorName = executor.Name, durationMs, nextStatus = result.NextStatus.ToString() },
                     cancellationToken);
 
                 await SaveCheckpointAndPublishAsync(context, cancellationToken);
 
                 if (result.NextStatus == WorkflowCheckpointStatus.WaitingForReview)
                 {
-                    await workflowEventPublisher.PublishAsync(
-                        new WorkflowEventMessage(
-                            WorkflowEventType.WorkflowWaitingReview,
-                            context.SessionId,
-                            context.WorkflowType,
-                            completedAt,
-                            new { executorName = executor.Name }),
+                    await PublishTrackedEventAsync(
+                        context,
+                        WorkflowEventType.WorkflowWaitingReview,
+                        completedAt,
+                        new { executorName = executor.Name },
                         cancellationToken);
 
                     return BuildResult(context, errorMessage: null);
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || context.CancellationToken.IsCancellationRequested)
+            {
+                logger.LogInformation(
+                    "Workflow executor cancelled. SessionId={SessionId}, ExecutorName={ExecutorName}",
+                    context.SessionId,
+                    executor.Name);
+
+                if (context.Status != WorkflowCheckpointStatus.Cancelled)
+                {
+                    workflowStateMachine.EnsureCanTransition(context.Status, WorkflowCheckpointStatus.Cancelled);
+                    context.ApplyStatus(WorkflowCheckpointStatus.Cancelled);
+                }
+
+                context.Set("LastError", "Workflow cancelled.");
+                await SaveCheckpointAndPublishAsync(context, cancellationToken);
+                return BuildResult(context, "Workflow cancelled.");
             }
             catch (Exception ex)
             {
@@ -167,21 +172,17 @@ internal sealed class WorkflowRunner(
                 context.Set("LastError", ex.Message);
 
                 await SaveCheckpointAndPublishAsync(context, cancellationToken);
-                await workflowEventPublisher.PublishAsync(
-                    new WorkflowEventMessage(
-                        WorkflowEventType.ExecutorFailed,
-                        context.SessionId,
-                        context.WorkflowType,
-                        DateTimeOffset.UtcNow,
-                        new { executorName = executor.Name, errorMessage = ex.Message }),
+                await PublishTrackedEventAsync(
+                    context,
+                    WorkflowEventType.ExecutorFailed,
+                    DateTimeOffset.UtcNow,
+                    new { executorName = executor.Name, errorMessage = ex.Message },
                     cancellationToken);
-                await workflowEventPublisher.PublishAsync(
-                    new WorkflowEventMessage(
-                        WorkflowEventType.WorkflowFailed,
-                        context.SessionId,
-                        context.WorkflowType,
-                        DateTimeOffset.UtcNow,
-                        new { executorName = executor.Name, errorMessage = ex.Message }),
+                await PublishTrackedEventAsync(
+                    context,
+                    WorkflowEventType.WorkflowFailed,
+                    DateTimeOffset.UtcNow,
+                    new { executorName = executor.Name, errorMessage = ex.Message },
                     cancellationToken);
 
                 return BuildResult(context, ex.Message);
@@ -191,16 +192,14 @@ internal sealed class WorkflowRunner(
         workflowStateMachine.EnsureCanTransition(context.Status, WorkflowCheckpointStatus.Completed);
         context.ApplyStatus(WorkflowCheckpointStatus.Completed);
 
+        await PublishTrackedEventAsync(
+            context,
+            WorkflowEventType.WorkflowCompleted,
+            DateTimeOffset.UtcNow,
+            new { completedExecutors = context.CompletedExecutors.Count },
+            cancellationToken);
         await SaveCheckpointAndPublishAsync(context, cancellationToken);
         await checkpointStorage.DeleteCheckpointAsync(context.SessionId, cancellationToken);
-        await workflowEventPublisher.PublishAsync(
-            new WorkflowEventMessage(
-                WorkflowEventType.WorkflowCompleted,
-                context.SessionId,
-                context.WorkflowType,
-                DateTimeOffset.UtcNow,
-                new { completedExecutors = context.CompletedExecutors.Count }),
-            cancellationToken);
 
         return BuildResult(context, errorMessage: null);
     }
@@ -208,17 +207,34 @@ internal sealed class WorkflowRunner(
     private async Task SaveCheckpointAndPublishAsync(WorkflowContext context, CancellationToken cancellationToken)
     {
         var checkpointVersion = context.AdvanceCheckpointVersion();
+        var checkpointSavedEvent = new WorkflowEventMessage(
+            WorkflowEventType.CheckpointSaved,
+            context.SessionId,
+            context.WorkflowType,
+            DateTimeOffset.UtcNow,
+            new { checkpointVersion, currentExecutor = context.CurrentExecutor, status = context.Status.ToString() });
+        var trackedEvent = WorkflowTimeline.Append(context, checkpointSavedEvent);
         var checkpoint = context.CreateCheckpointSnapshot();
 
         await checkpointStorage.SaveCheckpointAsync(checkpoint, cancellationToken);
-        await workflowEventPublisher.PublishAsync(
-            new WorkflowEventMessage(
-                WorkflowEventType.CheckpointSaved,
-                context.SessionId,
-                context.WorkflowType,
-                DateTimeOffset.UtcNow,
-                new { checkpointVersion, currentExecutor = context.CurrentExecutor, status = context.Status.ToString() }),
-            cancellationToken);
+        await workflowEventPublisher.PublishAsync(checkpointSavedEvent with { Sequence = trackedEvent.Sequence }, cancellationToken);
+    }
+
+    private async Task PublishTrackedEventAsync(
+        WorkflowContext context,
+        WorkflowEventType eventType,
+        DateTimeOffset timestamp,
+        object payload,
+        CancellationToken cancellationToken)
+    {
+        var workflowEvent = new WorkflowEventMessage(
+            eventType,
+            context.SessionId,
+            context.WorkflowType,
+            timestamp,
+            payload);
+        var trackedEvent = WorkflowTimeline.Append(context, workflowEvent);
+        await workflowEventPublisher.PublishAsync(workflowEvent with { Sequence = trackedEvent.Sequence }, cancellationToken);
     }
 
     private static int ResolveStartIndex(WorkflowContext context, IReadOnlyList<IWorkflowExecutor> executors)
