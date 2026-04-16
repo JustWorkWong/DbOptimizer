@@ -13,6 +13,9 @@ internal static class WorkflowContextKeys
     public const string ExecutionPlan = "ExecutionPlan";
     public const string IndexRecommendations = "IndexRecommendations";
     public const string FinalResult = "FinalResult";
+    public const string ReviewId = "ReviewId";
+    public const string ReviewStatus = "ReviewStatus";
+    public const string RejectionReason = "RejectionReason";
     public const string DatabaseDialect = "DatabaseDialect";
     public const string DatabaseType = "DatabaseType";
     public const string DbType = "DbType";
