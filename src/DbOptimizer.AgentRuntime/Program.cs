@@ -12,6 +12,9 @@ runtimeOptions = ResolveAiApiKeyFromEnvironment(runtimeOptions);
 ValidateRuntimeOptions(runtimeOptions, builder.Environment);
 
 builder.Services.AddSingleton(runtimeOptions);
+builder.Services.AddSingleton<MySqlMcpClient>();
+builder.Services.AddSingleton<PostgreSqlMcpClient>();
+builder.Services.AddSingleton<IMcpClientFactory, McpClientFactory>();
 builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();
