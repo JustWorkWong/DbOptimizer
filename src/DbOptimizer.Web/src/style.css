@@ -169,6 +169,10 @@ p {
   align-items: start;
 }
 
+.sql-grid {
+  grid-template-columns: minmax(640px, 1.6fr) minmax(320px, 0.9fr);
+}
+
 .view-switcher {
   display: flex;
   gap: 10px;
@@ -509,6 +513,12 @@ textarea:focus,
 .replay-list .timeline-item.active {
   border-color: rgba(17, 94, 89, 0.35);
   background: rgba(239, 249, 244, 0.96);
+}
+
+@media (max-width: 1320px) {
+  .sql-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .ghost-button,
