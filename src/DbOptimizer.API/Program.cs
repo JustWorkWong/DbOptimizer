@@ -50,6 +50,7 @@ builder.Services.AddSingleton<IIndexRecommendationGenerator, IndexRecommendation
 builder.Services.AddSingleton<IWorkflowExecutor, SqlParserExecutor>();
 builder.Services.AddSingleton<IWorkflowExecutor, ExecutionPlanExecutor>();
 builder.Services.AddSingleton<IWorkflowExecutor, IndexAdvisorExecutor>();
+builder.Services.AddSingleton<IWorkflowExecutor, CoordinatorExecutor>();
 builder.Services.AddSingleton<MigrationReadinessState>();
 builder.Services.AddHostedService<EfMigrationHostedService>();
 builder.Services.AddHostedService<RunningWorkflowRecoveryHostedService>();
