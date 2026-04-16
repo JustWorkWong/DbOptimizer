@@ -289,6 +289,11 @@ public sealed class ReviewApplicationServiceTests
             throw new NotSupportedException();
         }
 
+        public Task<WorkflowStartResponse> ScheduleDbConfigOptimizationAsync(CreateDbConfigOptimizationWorkflowRequest request, CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
         public Task<WorkflowCancelResponse> CancelAsync(Guid sessionId, CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
