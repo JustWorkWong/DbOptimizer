@@ -12,6 +12,7 @@ internal static class WorkflowContextKeys
     public const string ParsedSql = "ParsedSql";
     public const string ExecutionPlan = "ExecutionPlan";
     public const string IndexRecommendations = "IndexRecommendations";
+    public const string FinalResult = "FinalResult";
     public const string DatabaseDialect = "DatabaseDialect";
     public const string DatabaseType = "DatabaseType";
     public const string DbType = "DbType";
