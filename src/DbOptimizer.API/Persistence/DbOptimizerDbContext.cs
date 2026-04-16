@@ -27,6 +27,8 @@ internal sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext
 
     public DbSet<ErrorLogEntity> ErrorLogs => Set<ErrorLogEntity>();
 
+    public DbSet<SlowQueryEntity> SlowQueries => Set<SlowQueryEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasPostgresExtension("pgcrypto");
@@ -39,6 +41,7 @@ internal sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext
         ConfigureReviewTasks(modelBuilder);
         ConfigurePromptVersions(modelBuilder);
         ConfigureErrorLogs(modelBuilder);
+        ConfigureSlowQueries(modelBuilder);
     }
 
     private static void ConfigureWorkflowSessions(ModelBuilder modelBuilder)
@@ -255,6 +258,38 @@ internal sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext
             .HasForeignKey(x => x.ExecutionId)
             .OnDelete(DeleteBehavior.SetNull);
     }
+
+    private static void ConfigureSlowQueries(ModelBuilder modelBuilder)
+    {
+        var entity = modelBuilder.Entity<SlowQueryEntity>();
+        entity.ToTable("slow_queries");
+        entity.HasKey(x => x.QueryId);
+
+        entity.Property(x => x.QueryId)
+            .HasColumnName("query_id")
+            .HasDefaultValueSql("gen_random_uuid()");
+        entity.Property(x => x.DatabaseId).HasColumnName("database_id").HasMaxLength(100);
+        entity.Property(x => x.DatabaseType).HasColumnName("database_type").HasMaxLength(50);
+        entity.Property(x => x.SqlFingerprint).HasColumnName("sql_fingerprint");
+        entity.Property(x => x.QueryHash).HasColumnName("query_hash").HasMaxLength(64);
+        entity.Property(x => x.OriginalSql).HasColumnName("original_sql");
+        entity.Property(x => x.QueryType).HasColumnName("query_type").HasMaxLength(20);
+        entity.Property(x => x.Tables).HasColumnName("tables").HasMaxLength(500);
+        entity.Property(x => x.AvgExecutionTime).HasColumnName("avg_execution_time");
+        entity.Property(x => x.MaxExecutionTime).HasColumnName("max_execution_time");
+        entity.Property(x => x.ExecutionCount).HasColumnName("execution_count");
+        entity.Property(x => x.TotalRowsExamined).HasColumnName("total_rows_examined");
+        entity.Property(x => x.TotalRowsSent).HasColumnName("total_rows_sent");
+        entity.Property(x => x.FirstSeenAt).HasColumnName("first_seen_at");
+        entity.Property(x => x.LastSeenAt).HasColumnName("last_seen_at");
+        entity.Property(x => x.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("NOW()");
+        entity.Property(x => x.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("NOW()");
+
+        entity.HasIndex(x => new { x.QueryHash, x.DatabaseId }).HasDatabaseName("idx_slow_queries_hash_db");
+        entity.HasIndex(x => x.LastSeenAt).HasDatabaseName("idx_slow_queries_last_seen_desc").IsDescending(true);
+        entity.HasIndex(x => x.DatabaseId).HasDatabaseName("idx_slow_queries_database_id");
+        entity.HasIndex(x => x.AvgExecutionTime).HasDatabaseName("idx_slow_queries_avg_time_desc").IsDescending(true);
+    }
 }
 
 internal sealed class WorkflowSessionEntity
@@ -439,4 +474,25 @@ internal sealed class ErrorLogEntity
     public WorkflowSessionEntity? Session { get; set; }
 
     public AgentExecutionEntity? Execution { get; set; }
+}
+
+internal sealed class SlowQueryEntity
+{
+    public Guid QueryId { get; set; }
+    public string DatabaseId { get; set; } = string.Empty;
+    public string DatabaseType { get; set; } = string.Empty;
+    public string SqlFingerprint { get; set; } = string.Empty;
+    public string QueryHash { get; set; } = string.Empty;
+    public string OriginalSql { get; set; } = string.Empty;
+    public string QueryType { get; set; } = string.Empty;
+    public string Tables { get; set; } = string.Empty;
+    public TimeSpan AvgExecutionTime { get; set; }
+    public TimeSpan MaxExecutionTime { get; set; }
+    public int ExecutionCount { get; set; }
+    public long TotalRowsExamined { get; set; }
+    public long TotalRowsSent { get; set; }
+    public DateTimeOffset FirstSeenAt { get; set; }
+    public DateTimeOffset LastSeenAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
 }
