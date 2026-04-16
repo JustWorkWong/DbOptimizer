@@ -10,9 +10,13 @@
 - 联调验收数据库使用 Aspire 创建的 PostgreSQL + MySQL 测试库（固定端口/账号/密码由测试环境配置文件统一管理，不在业务代码中写死；脚本初始化数据）
 
 **当前里程碑进展（2026-04-16）**：
+- [x] M0-01 Aspire 编排落地（API / AgentRuntime / Web / PostgreSQL / MySQL / Redis 已纳入 AppHost）
+- [x] M0-02 配置体系与密钥管理（连接串/AI/MCP 配置化，支持本地覆盖与环境变量）
 - [x] M0-03 可观测性与日志治理（requestId/sessionId/executionId 已落地）
 - [x] M0-04 AI Provider 接入配置（endpoint/model/apiKey/requestTimeout/maxTokens 配置化，支持本地密钥覆盖）
 - [x] M0-05 测试数据库编排与初始化（PostgreSQL + MySQL 编排与初始化脚本已接入）
+- [x] M1-01 核心表与迁移脚本（已切换为 EF Core 迁移链路，结构迁移不再走 AppHost SQL 初始化）
+- [x] M1-02 JSONB 结构与索引策略（已补齐 `workflow_sessions.state` 的 JSONB 路径索引）
 
 ---
 
@@ -48,7 +52,7 @@
    - 内容：`workflow_sessions`、`agent_executions`、`tool_calls`、`agent_messages`、`decision_records`、`review_tasks`、`prompt_versions`、`error_logs`
    - 依赖：M0-01
    - 交付：迁移可重复执行，结构与文档一致
-5. **M1-02 JSONB 结构与索引策略**
+5. **M1-02 JSONB 结构与索引策略** [x]
    - 内容：Checkpoint `state`、证据链 `evidence`、Token 消耗等 JSONB 字段落库 + 必要索引
    - 依赖：M1-01
    - 交付：关键查询（状态/时间/会话）性能达标
@@ -392,4 +396,4 @@ ORDER BY created_at DESC;
   4. push 到远端分支
 - 禁止多任务堆积后一次性提交与推送（紧急修复除外，需在提交说明中标注原因）
 - Release Gate 前必须完成任务到提交的追溯映射：`Task -> Commit -> Push` 可核对
-
+---
