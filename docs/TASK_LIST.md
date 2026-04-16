@@ -18,6 +18,7 @@
 - [x] M1-01 核心表与迁移脚本（已切换为 EF Core 迁移链路，结构迁移不再走 AppHost SQL 初始化）
 - [x] M1-02 JSONB 结构与索引策略（已补齐 `workflow_sessions.state` 的 JSONB 路径索引）
 - [x] M1-03 Checkpoint 双层存储（已补齐 PostgreSQL 持久化、Redis 热缓存与启动恢复预热）
+- [x] M2-01 MySQL/PostgreSQL MCP 客户端封装（已补齐统一接口、工厂与 stdio MCP 客户端封装）
 
 ---
 
@@ -63,7 +64,7 @@
    - 交付：进程重启后可恢复 Running 会话
 
 #### M2-MCP 集成与容错（联调验收覆盖 PostgreSQL + MySQL 双库）
-7. **M2-01 MySQL/PostgreSQL MCP 客户端封装**
+7. **M2-01 MySQL/PostgreSQL MCP 客户端封装** [x]
    - 内容：统一接口、工具调用（query/describe/explain/show_indexes）
    - 依赖：M0-02
    - 交付：两类数据库 MCP 均可稳定调用
