@@ -3,6 +3,7 @@ using DbOptimizer.API.Api;
 using DbOptimizer.API.DatabaseMigrations;
 using DbOptimizer.API.Persistence;
 using DbOptimizer.API.Workflows;
+using DbOptimizer.API.SlowQuery;
 using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
 
@@ -15,6 +16,8 @@ var workflowRuntimeOptions = builder.Configuration.GetSection(WorkflowRuntimeOpt
     ?? new WorkflowRuntimeOptions();
 var configCollectionOptions = builder.Configuration.GetSection(ConfigCollectionOptions.SectionName).Get<ConfigCollectionOptions>()
     ?? new ConfigCollectionOptions();
+var slowQueryCollectionOptions = builder.Configuration.GetSection(SlowQueryCollectionOptions.SectionName).Get<SlowQueryCollectionOptions>()
+    ?? new SlowQueryCollectionOptions();
 
 builder.Logging.Configure(options =>
 {
@@ -55,6 +58,7 @@ builder.Services.AddSingleton<ISqlParser, LightweightSqlParser>();
 builder.Services.AddSingleton(executionPlanOptions);
 builder.Services.AddSingleton(workflowRuntimeOptions);
 builder.Services.AddSingleton(configCollectionOptions);
+builder.Services.AddSingleton(slowQueryCollectionOptions);
 builder.Services.AddSingleton<IExecutionPlanProvider, ExecutionPlanProvider>();
 builder.Services.AddSingleton<IExecutionPlanAnalyzer, ExecutionPlanAnalyzer>();
 builder.Services.AddSingleton<ITableIndexMetadataProvider, TableIndexMetadataProvider>();
@@ -79,9 +83,13 @@ builder.Services.AddSingleton<IWorkflowExecutor, ConfigCollectorExecutor>();
 builder.Services.AddSingleton<IWorkflowExecutor, ConfigAnalyzerExecutor>();
 builder.Services.AddSingleton<IWorkflowExecutor, ConfigCoordinatorExecutor>();
 builder.Services.AddSingleton<IWorkflowExecutor, ConfigReviewExecutor>();
+builder.Services.AddSingleton<ISlowQueryCollector, SlowQueryCollector>();
+builder.Services.AddSingleton<ISlowQueryNormalizer, SlowQueryNormalizer>();
+builder.Services.AddSingleton<ISlowQueryRepository, SlowQueryRepository>();
 builder.Services.AddSingleton<MigrationReadinessState>();
 builder.Services.AddHostedService<EfMigrationHostedService>();
 builder.Services.AddHostedService<RunningWorkflowRecoveryHostedService>();
+builder.Services.AddHostedService<SlowQueryCollectionService>();
 
 var app = builder.Build();
 
