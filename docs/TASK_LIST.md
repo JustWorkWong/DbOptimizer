@@ -17,6 +17,7 @@
 - [x] M0-05 测试数据库编排与初始化（PostgreSQL + MySQL 编排与初始化脚本已接入）
 - [x] M1-01 核心表与迁移脚本（已切换为 EF Core 迁移链路，结构迁移不再走 AppHost SQL 初始化）
 - [x] M1-02 JSONB 结构与索引策略（已补齐 `workflow_sessions.state` 的 JSONB 路径索引）
+- [x] M1-03 Checkpoint 双层存储（已补齐 PostgreSQL 持久化、Redis 热缓存与启动恢复预热）
 
 ---
 
@@ -56,7 +57,7 @@
    - 内容：Checkpoint `state`、证据链 `evidence`、Token 消耗等 JSONB 字段落库 + 必要索引
    - 依赖：M1-01
    - 交付：关键查询（状态/时间/会话）性能达标
-6. **M1-03 Checkpoint 双层存储**
+6. **M1-03 Checkpoint 双层存储** [x]
    - 内容：PostgreSQL 持久化 + Redis 热缓存；保存/读取/删除
    - 依赖：M1-01
    - 交付：进程重启后可恢复 Running 会话

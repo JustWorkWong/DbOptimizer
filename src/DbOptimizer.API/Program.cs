@@ -1,8 +1,12 @@
+using DbOptimizer.API.Checkpointing;
 using DbOptimizer.API.DatabaseMigrations;
 using DbOptimizer.API.Persistence;
 using Microsoft.EntityFrameworkCore;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
+var postgreSqlConnectionString = ResolvePostgreSqlConnectionString(builder.Configuration);
+var redisConnectionString = ResolveRedisConnectionString(builder.Configuration);
 
 builder.Logging.Configure(options =>
 {
@@ -18,9 +22,21 @@ builder.Logging.Configure(options =>
  * - 迁移成功后再标记健康就绪
  * ========================= */
 builder.Services.AddDbContext<DbOptimizerDbContext>(options =>
-    options.UseNpgsql(ResolvePostgreSqlConnectionString(builder.Configuration)));
+    options.UseNpgsql(postgreSqlConnectionString));
+builder.Services.AddDbContextFactory<DbOptimizerDbContext>(options =>
+    options.UseNpgsql(postgreSqlConnectionString));
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+{
+    var configurationOptions = ConfigurationOptions.Parse(redisConnectionString);
+    configurationOptions.AbortOnConnectFail = false;
+    configurationOptions.ConnectRetry = 2;
+
+    return ConnectionMultiplexer.Connect(configurationOptions);
+});
+builder.Services.AddSingleton<ICheckpointStorage, PostgresRedisCheckpointStorage>();
 builder.Services.AddSingleton<MigrationReadinessState>();
 builder.Services.AddHostedService<EfMigrationHostedService>();
+builder.Services.AddHostedService<RunningWorkflowRecoveryHostedService>();
 
 var app = builder.Build();
 
@@ -82,4 +98,27 @@ static string ResolvePostgreSqlConnectionString(IConfiguration configuration)
     }
 
     throw new InvalidOperationException("Missing PostgreSQL connection string: ConnectionStrings:dboptimizer-postgres or ConnectionStrings:PostgreSql");
+}
+
+static string ResolveRedisConnectionString(IConfiguration configuration)
+{
+    var fromAspire = configuration.GetConnectionString("redis");
+    if (!string.IsNullOrWhiteSpace(fromAspire))
+    {
+        return fromAspire;
+    }
+
+    var fallback = configuration.GetConnectionString("Redis");
+    if (!string.IsNullOrWhiteSpace(fallback))
+    {
+        return fallback;
+    }
+
+    var nested = configuration["DbOptimizer:ConnectionStrings:Redis"];
+    if (!string.IsNullOrWhiteSpace(nested))
+    {
+        return nested;
+    }
+
+    throw new InvalidOperationException("Missing Redis connection string: ConnectionStrings:redis or ConnectionStrings:Redis or DbOptimizer:ConnectionStrings:Redis");
 }
