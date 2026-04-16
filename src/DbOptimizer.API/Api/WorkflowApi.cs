@@ -39,13 +39,21 @@ internal static class WorkflowApiRouteBuilderExtensions
         }
     }
 
-    private static IResult HandleCreateDbConfigOptimizationAsync(HttpContext httpContext)
+    private static async Task<IResult> HandleCreateDbConfigOptimizationAsync(
+        CreateDbConfigOptimizationWorkflowRequest request,
+        IWorkflowExecutionScheduler scheduler,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
     {
-        return ApiEnvelopeFactory.Failure(
-            httpContext,
-            StatusCodes.Status501NotImplemented,
-            "WORKFLOW_NOT_IMPLEMENTED",
-            "Database configuration optimization workflow has not been implemented yet.");
+        try
+        {
+            var response = await scheduler.ScheduleDbConfigOptimizationAsync(request, cancellationToken);
+            return ApiEnvelopeFactory.Success(httpContext, response);
+        }
+        catch (ApiException ex)
+        {
+            return ApiEnvelopeFactory.Failure(httpContext, ex.StatusCode, ex.Code, ex.Message, ex.Details);
+        }
     }
 
     private static async Task<IResult> HandleGetWorkflowAsync(
@@ -114,6 +122,13 @@ internal sealed class CreateSqlAnalysisWorkflowRequest
     public SqlAnalysisWorkflowOptions Options { get; set; } = new();
 }
 
+internal sealed class CreateDbConfigOptimizationWorkflowRequest
+{
+    public string DatabaseId { get; set; } = string.Empty;
+
+    public string DatabaseType { get; set; } = string.Empty;
+}
+
 internal sealed class SqlAnalysisWorkflowOptions
 {
     public bool EnableIndexRecommendation { get; set; } = true;
@@ -147,6 +162,10 @@ internal interface IWorkflowExecutionScheduler
         CreateSqlAnalysisWorkflowRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<WorkflowStartResponse> ScheduleDbConfigOptimizationAsync(
+        CreateDbConfigOptimizationWorkflowRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<WorkflowCancelResponse> CancelAsync(Guid sessionId, CancellationToken cancellationToken = default);
 
     Task<WorkflowResumeResponse> ResumeAsync(Guid sessionId, CancellationToken cancellationToken = default);
@@ -177,6 +196,14 @@ internal sealed class WorkflowExecutionScheduler(
         "RegenerationExecutor"
     ];
 
+    private static readonly string[] DbConfigOptimizationExecutorOrder =
+    [
+        "ConfigCollectorExecutor",
+        "ConfigAnalyzerExecutor",
+        "ConfigCoordinatorExecutor",
+        "ConfigReviewExecutor"
+    ];
+
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _runningSessions = new();
     private readonly IReadOnlyList<IWorkflowExecutor> _workflowExecutors = workflowExecutors.ToArray();
 
@@ -202,6 +229,35 @@ internal sealed class WorkflowExecutionScheduler(
         context.Set(WorkflowContextKeys.DatabaseType, databaseEngine);
         context.Set(WorkflowContextKeys.DatabaseDialect, databaseEngine);
         context.Set("Options", request.Options);
+        context.AdvanceCheckpointVersion();
+
+        await checkpointStorage.SaveCheckpointAsync(context.CreateCheckpointSnapshot(), cancellationToken);
+        ScheduleBackgroundExecution(
+            sessionId,
+            cancellationToken: CancellationToken.None,
+            executeAsync: token => workflowRunner.RunAsync(context, _workflowExecutors, token));
+
+        return new WorkflowStartResponse(sessionId, WorkflowCheckpointStatus.Running.ToString(), context.CreatedAt);
+    }
+
+    public async Task<WorkflowStartResponse> ScheduleDbConfigOptimizationAsync(
+        CreateDbConfigOptimizationWorkflowRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.DatabaseId))
+        {
+            throw new ApiException(StatusCodes.Status400BadRequest, "INVALID_REQUEST", "DatabaseId is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.DatabaseType))
+        {
+            throw new ApiException(StatusCodes.Status400BadRequest, "INVALID_REQUEST", "DatabaseType is required.");
+        }
+
+        var sessionId = Guid.NewGuid();
+        var context = new WorkflowContext(sessionId, "DbConfigOptimization");
+        context.Set(WorkflowContextKeys.DatabaseId, request.DatabaseId.Trim());
+        context.Set(WorkflowContextKeys.DatabaseType, request.DatabaseType.Trim());
         context.AdvanceCheckpointVersion();
 
         await checkpointStorage.SaveCheckpointAsync(context.CreateCheckpointSnapshot(), cancellationToken);

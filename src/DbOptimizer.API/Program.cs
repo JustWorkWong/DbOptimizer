@@ -13,6 +13,8 @@ var executionPlanOptions = builder.Configuration.GetSection(ExecutionPlanOptions
     ?? CreateDefaultExecutionPlanOptions();
 var workflowRuntimeOptions = builder.Configuration.GetSection(WorkflowRuntimeOptions.SectionName).Get<WorkflowRuntimeOptions>()
     ?? new WorkflowRuntimeOptions();
+var configCollectionOptions = builder.Configuration.GetSection(ConfigCollectionOptions.SectionName).Get<ConfigCollectionOptions>()
+    ?? new ConfigCollectionOptions();
 
 builder.Logging.Configure(options =>
 {
@@ -52,18 +54,31 @@ builder.Services.AddSingleton<IHistoryQueryService, HistoryQueryService>();
 builder.Services.AddSingleton<ISqlParser, LightweightSqlParser>();
 builder.Services.AddSingleton(executionPlanOptions);
 builder.Services.AddSingleton(workflowRuntimeOptions);
+builder.Services.AddSingleton(configCollectionOptions);
 builder.Services.AddSingleton<IExecutionPlanProvider, ExecutionPlanProvider>();
 builder.Services.AddSingleton<IExecutionPlanAnalyzer, ExecutionPlanAnalyzer>();
 builder.Services.AddSingleton<ITableIndexMetadataProvider, TableIndexMetadataProvider>();
 builder.Services.AddSingleton<ITableIndexMetadataAnalyzer, TableIndexMetadataAnalyzer>();
 builder.Services.AddSingleton<IIndexRecommendationGenerator, IndexRecommendationGenerator>();
+builder.Services.AddSingleton<IConfigCollectionProvider, ConfigCollectionProvider>();
+builder.Services.AddSingleton<IConfigRule, MySqlBufferPoolRule>();
+builder.Services.AddSingleton<IConfigRule, MySqlMaxConnectionsRule>();
+builder.Services.AddSingleton<IConfigRule, PostgreSqlSharedBuffersRule>();
+builder.Services.AddSingleton<IConfigRule, PostgreSqlWorkMemRule>();
+builder.Services.AddSingleton<IConfigRule, MySqlQueryCacheRule>();
+builder.Services.AddSingleton<IConfigRuleEngine, ConfigRuleEngine>();
 builder.Services.AddSingleton<IReviewTaskService, ReviewTaskService>();
+builder.Services.AddSingleton<IConfigReviewTaskService, ConfigReviewTaskService>();
 builder.Services.AddSingleton<IWorkflowExecutor, SqlParserExecutor>();
 builder.Services.AddSingleton<IWorkflowExecutor, ExecutionPlanExecutor>();
 builder.Services.AddSingleton<IWorkflowExecutor, IndexAdvisorExecutor>();
 builder.Services.AddSingleton<IWorkflowExecutor, CoordinatorExecutor>();
 builder.Services.AddSingleton<IWorkflowExecutor, HumanReviewExecutor>();
 builder.Services.AddSingleton<IWorkflowExecutor, RegenerationExecutor>();
+builder.Services.AddSingleton<IWorkflowExecutor, ConfigCollectorExecutor>();
+builder.Services.AddSingleton<IWorkflowExecutor, ConfigAnalyzerExecutor>();
+builder.Services.AddSingleton<IWorkflowExecutor, ConfigCoordinatorExecutor>();
+builder.Services.AddSingleton<IWorkflowExecutor, ConfigReviewExecutor>();
 builder.Services.AddSingleton<MigrationReadinessState>();
 builder.Services.AddHostedService<EfMigrationHostedService>();
 builder.Services.AddHostedService<RunningWorkflowRecoveryHostedService>();

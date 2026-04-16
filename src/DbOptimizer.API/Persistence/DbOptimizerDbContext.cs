@@ -183,6 +183,7 @@ internal sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext
             .HasColumnName("task_id")
             .HasDefaultValueSql("gen_random_uuid()");
         entity.Property(x => x.SessionId).HasColumnName("session_id");
+        entity.Property(x => x.TaskType).HasColumnName("task_type").HasMaxLength(50);
         entity.Property(x => x.Recommendations).HasColumnName("recommendations").HasColumnType("jsonb");
         entity.Property(x => x.Status).HasColumnName("status").HasMaxLength(20);
         entity.Property(x => x.ReviewerComment).HasColumnName("reviewer_comment");
@@ -192,6 +193,7 @@ internal sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext
 
         entity.HasIndex(x => x.SessionId).HasDatabaseName("idx_review_tasks_session_id");
         entity.HasIndex(x => x.Status).HasDatabaseName("idx_review_tasks_status");
+        entity.HasIndex(x => x.TaskType).HasDatabaseName("idx_review_tasks_task_type");
         entity.HasIndex(x => x.CreatedAt).HasDatabaseName("idx_review_tasks_created_at_desc").IsDescending(true);
 
         entity.HasOne(x => x.Session)
@@ -379,6 +381,8 @@ internal sealed class ReviewTaskEntity
     public Guid TaskId { get; set; }
 
     public Guid SessionId { get; set; }
+
+    public string TaskType { get; set; } = string.Empty;
 
     public string Recommendations { get; set; } = "{}";
 
