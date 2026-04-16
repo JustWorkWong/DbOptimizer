@@ -16,6 +16,7 @@ internal static class WorkflowContextKeys
     public const string ReviewId = "ReviewId";
     public const string ReviewStatus = "ReviewStatus";
     public const string RejectionReason = "RejectionReason";
+    public const string RegenerationCount = "RegenerationCount";
     public const string DatabaseDialect = "DatabaseDialect";
     public const string DatabaseType = "DatabaseType";
     public const string DbType = "DbType";
