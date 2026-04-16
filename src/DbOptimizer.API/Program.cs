@@ -1,6 +1,7 @@
 using DbOptimizer.API.Checkpointing;
 using DbOptimizer.API.DatabaseMigrations;
 using DbOptimizer.API.Persistence;
+using DbOptimizer.API.Workflows;
 using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
 
@@ -34,6 +35,9 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
     return ConnectionMultiplexer.Connect(configurationOptions);
 });
 builder.Services.AddSingleton<ICheckpointStorage, PostgresRedisCheckpointStorage>();
+builder.Services.AddSingleton<IWorkflowEventPublisher, LoggingWorkflowEventPublisher>();
+builder.Services.AddSingleton<IWorkflowStateMachine, WorkflowStateMachine>();
+builder.Services.AddSingleton<IWorkflowRunner, WorkflowRunner>();
 builder.Services.AddSingleton<MigrationReadinessState>();
 builder.Services.AddHostedService<EfMigrationHostedService>();
 builder.Services.AddHostedService<RunningWorkflowRecoveryHostedService>();
