@@ -13,8 +13,14 @@ internal sealed class McpClientFactory(IServiceProvider serviceProvider) : IMcpC
     }
 }
 
-internal sealed class MySqlMcpClient(RuntimeOptions runtimeOptions, ILogger<DatabaseMcpClient> logger)
-    : DatabaseMcpClient(DatabaseEngine.MySql, runtimeOptions.Mcp.MySql, logger);
+internal sealed class MySqlMcpClient(
+    RuntimeOptions runtimeOptions,
+    IDatabaseMcpFallbackExecutor fallbackExecutor,
+    ILogger<DatabaseMcpClient> logger)
+    : DatabaseMcpClient(DatabaseEngine.MySql, runtimeOptions.Mcp.MySql, runtimeOptions.Mcp, fallbackExecutor, logger);
 
-internal sealed class PostgreSqlMcpClient(RuntimeOptions runtimeOptions, ILogger<DatabaseMcpClient> logger)
-    : DatabaseMcpClient(DatabaseEngine.PostgreSql, runtimeOptions.Mcp.PostgreSql, logger);
+internal sealed class PostgreSqlMcpClient(
+    RuntimeOptions runtimeOptions,
+    IDatabaseMcpFallbackExecutor fallbackExecutor,
+    ILogger<DatabaseMcpClient> logger)
+    : DatabaseMcpClient(DatabaseEngine.PostgreSql, runtimeOptions.Mcp.PostgreSql, runtimeOptions.Mcp, fallbackExecutor, logger);

@@ -19,6 +19,7 @@
 - [x] M1-02 JSONB 结构与索引策略（已补齐 `workflow_sessions.state` 的 JSONB 路径索引）
 - [x] M1-03 Checkpoint 双层存储（已补齐 PostgreSQL 持久化、Redis 热缓存与启动恢复预热）
 - [x] M2-01 MySQL/PostgreSQL MCP 客户端封装（已补齐统一接口、工厂与 stdio MCP 客户端封装）
+- [x] M2-02 超时、重试、降级策略（已补齐配置驱动的 timeout/retry/fallback 与审计日志标记）
 
 ---
 
@@ -68,7 +69,7 @@
    - 内容：统一接口、工具调用（query/describe/explain/show_indexes）
    - 依赖：M0-02
    - 交付：两类数据库 MCP 均可稳定调用
-8. **M2-02 超时、重试、降级策略（配置驱动）**
+8. **M2-02 超时、重试、降级策略（配置驱动）** [x]
    - 内容：MCP 超时、重试次数、退避策略、降级开关统一配置化（按环境可覆盖）；MCP 异常时 fallback（直连查询）受配置开关与审计控制
    - 依赖：M2-01
    - 交付：MCP 不稳定时流程不中断且可观测，无需改代码即可调参
