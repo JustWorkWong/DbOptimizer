@@ -35,11 +35,13 @@ const submitting = ref(false)
 const sseState = ref<'idle' | 'connecting' | 'live' | 'error'>('idle')
 const action = ref<SubmitReviewPayload['action']>('approve')
 const adjustmentText = ref('')
+const currentLoadId = ref(0)
+const activeSessionId = ref('')
 
 let eventSource: EventSource | null = null
 
 const report = computed<OptimizationReport | null>(() => {
-  return selectedReview.value?.recommendations ?? workflow.value?.result ?? historyDetail.value?.result ?? null
+  return workflow.value?.result ?? historyDetail.value?.result ?? selectedReview.value?.recommendations ?? null
 })
 
 onMounted(async () => {
@@ -52,15 +54,18 @@ onBeforeUnmount(() => {
 
 watch(selectedTaskId, async (taskId) => {
   if (!taskId) {
+    resetReviewForm()
     selectedReview.value = null
     workflow.value = null
     historyDetail.value = null
     replayEvents.value = []
+    activeSessionId.value = ''
     closeEventSource()
     return
   }
 
-  await loadReviewWorkspace(taskId)
+  const loadId = ++currentLoadId.value
+  await loadReviewWorkspace(taskId, loadId)
 })
 
 async function loadDashboard() {
@@ -76,6 +81,11 @@ async function loadReviews() {
   try {
     const response = await getPendingReviews()
     reviews.value = response.items
+
+    if (response.items.length === 0) {
+      selectedTaskId.value = ''
+      return
+    }
 
     if (!selectedTaskId.value && response.items.length > 0) {
       selectedTaskId.value = response.items[0].taskId
@@ -95,20 +105,32 @@ async function loadReviews() {
   }
 }
 
-async function loadReviewWorkspace(taskId: string) {
+async function loadReviewWorkspace(taskId: string, loadId: number) {
   loadingDetail.value = true
   errorMessage.value = ''
   successMessage.value = ''
+  resetReviewForm()
+  closeEventSource()
+  workflow.value = null
+  historyDetail.value = null
+  replayEvents.value = []
 
   try {
     const detail = await getReview(taskId)
+    if (loadId !== currentLoadId.value) return
+
     selectedReview.value = detail
-    workflow.value = await getWorkflow(detail.sessionId)
+    activeSessionId.value = detail.sessionId
+
+    const latestWorkflow = await getWorkflow(detail.sessionId)
+    if (loadId !== currentLoadId.value) return
+    workflow.value = latestWorkflow
 
     const [history, replay] = await Promise.allSettled([
       getHistoryDetail(detail.sessionId),
       getHistoryReplay(detail.sessionId),
     ])
+    if (loadId !== currentLoadId.value) return
 
     historyDetail.value = history.status === 'fulfilled' ? history.value : null
     replayEvents.value = replay.status === 'fulfilled' ? replay.value.events : []
@@ -124,11 +146,13 @@ async function loadReviewWorkspace(taskId: string) {
 function connectToWorkflowEvents(sessionId: string) {
   closeEventSource()
   sseState.value = 'connecting'
+  activeSessionId.value = sessionId
 
   const source = createWorkflowEventSource(sessionId)
   eventSource = source
 
   source.addEventListener('WorkflowEvent', (event) => {
+    if (activeSessionId.value !== sessionId) return
     const data = JSON.parse((event as MessageEvent<string>).data) as WorkflowStreamEvent
     sseState.value = 'live'
     upsertReplayEvent(data)
@@ -136,6 +160,7 @@ function connectToWorkflowEvents(sessionId: string) {
   })
 
   source.addEventListener('snapshot', (event) => {
+    if (activeSessionId.value !== sessionId) return
     const data = JSON.parse((event as MessageEvent<string>).data) as WorkflowStreamEvent
     sseState.value = 'live'
     if (data.payload) {
@@ -144,10 +169,12 @@ function connectToWorkflowEvents(sessionId: string) {
   })
 
   source.addEventListener('heartbeat', () => {
+    if (activeSessionId.value !== sessionId) return
     sseState.value = 'live'
   })
 
   source.onerror = () => {
+    if (activeSessionId.value !== sessionId) return
     sseState.value = 'error'
   }
 }
@@ -159,9 +186,17 @@ function closeEventSource() {
 }
 
 async function refreshWorkflow(sessionId: string) {
+  if (activeSessionId.value !== sessionId) return
+
   try {
-    workflow.value = await getWorkflow(sessionId)
-    historyDetail.value = await getHistoryDetail(sessionId)
+    const [latestWorkflow, latestHistory] = await Promise.all([
+      getWorkflow(sessionId),
+      getHistoryDetail(sessionId),
+    ])
+
+    if (activeSessionId.value !== sessionId) return
+    workflow.value = latestWorkflow
+    historyDetail.value = latestHistory
   } catch {
     // Keep the last successful snapshot on transient failures.
   }
@@ -187,17 +222,22 @@ async function handleSubmit() {
   submitting.value = true
 
   try {
+    const taskId = selectedReview.value.taskId
+    const sessionId = selectedReview.value.sessionId
     const payload = buildSubmitPayload()
-    const result = await submitReview(selectedReview.value.taskId, payload)
+    const result = await submitReview(taskId, payload)
     successMessage.value = `审核已提交：${result.status}`
+    resetReviewForm()
 
     await Promise.all([
       loadDashboard(),
       loadReviews(),
-      refreshWorkflow(selectedReview.value.sessionId),
+      refreshWorkflow(sessionId),
     ])
 
-    historyDetail.value = await getHistoryDetail(selectedReview.value.sessionId)
+    if (activeSessionId.value === sessionId) {
+      historyDetail.value = await getHistoryDetail(sessionId)
+    }
   } catch (error) {
     errorMessage.value = getErrorText(error)
   } finally {
@@ -223,6 +263,12 @@ function buildSubmitPayload(): SubmitReviewPayload {
 
 function selectReview(taskId: string) {
   selectedTaskId.value = taskId
+}
+
+function resetReviewForm() {
+  action.value = 'approve'
+  feedback.value = ''
+  adjustmentText.value = ''
 }
 
 function statusTone(status: string) {
