@@ -224,3 +224,64 @@ internal sealed record ConfigRecommendation
     /// </summary>
     public string RuleName { get; init; } = string.Empty;
 }
+
+/// <summary>
+/// 配置优化报告（Coordinator 汇总结果）
+/// </summary>
+internal sealed record ConfigOptimizationReport
+{
+    /// <summary>
+    /// 汇总摘要（自然语言）
+    /// </summary>
+    public required string Summary { get; init; }
+
+    /// <summary>
+    /// 配置优化建议列表
+    /// </summary>
+    public required IReadOnlyList<ConfigRecommendation> Recommendations { get; init; }
+
+    /// <summary>
+    /// 整体置信度（加权平均）
+    /// </summary>
+    public required double OverallConfidence { get; init; }
+
+    /// <summary>
+    /// 报告生成时间
+    /// </summary>
+    public required DateTimeOffset GeneratedAt { get; init; }
+
+    /// <summary>
+    /// 数据库类型
+    /// </summary>
+    public required string DatabaseType { get; init; }
+
+    /// <summary>
+    /// 数据库 ID
+    /// </summary>
+    public required string DatabaseId { get; init; }
+
+    /// <summary>
+    /// 高影响建议数量
+    /// </summary>
+    public int HighImpactCount { get; init; }
+
+    /// <summary>
+    /// 中等影响建议数量
+    /// </summary>
+    public int MediumImpactCount { get; init; }
+
+    /// <summary>
+    /// 低影响建议数量
+    /// </summary>
+    public int LowImpactCount { get; init; }
+
+    /// <summary>
+    /// 需要重启的参数数量
+    /// </summary>
+    public int RequiresRestartCount { get; init; }
+
+    /// <summary>
+    /// 元数据（扩展字段）
+    /// </summary>
+    public IReadOnlyDictionary<string, object> Metadata { get; init; } = new Dictionary<string, object>();
+}
