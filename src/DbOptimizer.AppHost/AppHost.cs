@@ -26,7 +26,7 @@ var mySqlPassword = builder.AddParameter("mysql-password", mySqlPasswordValue, s
 var postgresInitDirectory = Path.Combine(builder.AppHostDirectory, "DatabaseInit", "postgresql");
 var mySqlInitDirectory = Path.Combine(builder.AppHostDirectory, "DatabaseInit", "mysql");
 
-var postgres = builder.AddPostgres("postgres", userName: postgresUser, password: postgresPassword, port: postgresPort)
+var postgres = builder.AddPostgres("postgres", userName: postgresUser, password: postgresPassword)
     .WithDataVolume()
     .WithEnvironment("POSTGRES_USER", postgresUsername)
     .WithEnvironment("POSTGRES_PASSWORD", postgresPasswordValue)
@@ -39,7 +39,7 @@ var postgres = builder.AddPostgres("postgres", userName: postgresUser, password:
 var postgresDatabaseName = GetRequiredValue("DbOptimizer:Databases:PostgreSql:Database");
 var postgresDb = postgres.AddDatabase("dboptimizer-postgres", postgresDatabaseName);
 
-var mySql = builder.AddMySql("mysql", password: mySqlPassword, port: mySqlPort)
+var mySql = builder.AddMySql("mysql", password: mySqlPassword)
     .WithDataVolume()
     .WithEnvironment("MYSQL_ROOT_PASSWORD", mySqlPasswordValue)
     .WithInitFiles(mySqlInitDirectory)
@@ -53,7 +53,6 @@ var mySqlDb = mySql.AddDatabase("dboptimizer-mysql", mySqlDatabaseName);
 
 var redis = builder.AddRedis("redis")
     .WithDataVolume()
-    .WithHostPort(redisPort)
     .WithRedisInsight(redisInsight =>
     {
         redisInsight.WithHostPort(redisInsightPort);
@@ -62,23 +61,16 @@ var redis = builder.AddRedis("redis")
 var api = builder.AddProject<Projects.DbOptimizer_API>("api")
     .WithReference(postgresDb)
     .WithReference(mySqlDb)
-    .WithReference(redis)
-    .WithHttpHealthCheck("/health")
-    .WaitFor(postgresDb)
-    .WaitFor(mySqlDb)
-    .WaitFor(redis);
+    .WithReference(redis);
 
 builder.AddProject<Projects.DbOptimizer_AgentRuntime>("agentruntime")
     .WithReference(postgresDb)
     .WithReference(mySqlDb)
-    .WithReference(redis)
-    .WaitFor(postgresDb)
-    .WaitFor(mySqlDb)
-    .WaitFor(redis);
+    .WithReference(redis);
 
 builder.AddViteApp("web", "../DbOptimizer.Web")
     .WithReference(api)
-    .WaitFor(api);
+    .WithEnvironment("VITE_API_PROXY_TARGET", api.GetEndpoint("http"));
 
 builder.Build().Run();
 
