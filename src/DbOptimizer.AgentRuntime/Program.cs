@@ -2,6 +2,7 @@ using DbOptimizer.AgentRuntime;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 builder.Configuration.AddEnvironmentVariables("DBOPTIMIZER_");
 
 var runtimeOptions = builder.Configuration.GetSection(RuntimeOptions.SectionName).Get<RuntimeOptions>()
