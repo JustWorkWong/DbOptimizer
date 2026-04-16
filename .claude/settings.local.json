@@ -6,7 +6,8 @@
       "Bash(bash *)",
       "*",
       "Bash(git *)",
-      "Bash(wc -l /e/wfcodes/DbOptimizer/src/DbOptimizer.API/Workflows/*.cs.)"
+      "Bash(wc -l /e/wfcodes/DbOptimizer/src/DbOptimizer.API/Workflows/*.cs.)",
+      "Bash(dotnet run *)"
     ]
   }
 }
