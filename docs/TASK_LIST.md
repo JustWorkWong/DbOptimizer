@@ -20,6 +20,7 @@
 - [x] M1-03 Checkpoint 双层存储（已补齐 PostgreSQL 持久化、Redis 热缓存与启动恢复预热）
 - [x] M2-01 MySQL/PostgreSQL MCP 客户端封装（已补齐统一接口、工厂与 stdio MCP 客户端封装）
 - [x] M2-02 超时、重试、降级策略（已补齐配置驱动的 timeout/retry/fallback 与审计日志标记）
+- [x] M3-01 Workflow 基础框架（已补齐 WorkflowContext、状态机、事件发布与串行运行器）
 
 ---
 
@@ -75,7 +76,7 @@
    - 交付：MCP 不稳定时流程不中断且可观测，无需改代码即可调参
 
 #### M3-SQL 调优 Workflow（核心主线）
-9. **M3-01 Workflow 基础框架**
+9. **M3-01 Workflow 基础框架** [x]
    - 内容：WorkflowContext、Executor 接口、状态机、事件发布
    - 依赖：M1-03
    - 交付：可编排串行执行并可恢复
