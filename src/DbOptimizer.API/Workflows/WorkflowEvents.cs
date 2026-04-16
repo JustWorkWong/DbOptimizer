@@ -11,6 +11,7 @@ internal enum WorkflowEventType
     ExecutorCompleted,
     ExecutorFailed,
     WorkflowWaitingReview,
+    WorkflowCancelled,
     WorkflowCompleted,
     WorkflowFailed,
     CheckpointSaved
