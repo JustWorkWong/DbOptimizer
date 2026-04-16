@@ -8,6 +8,8 @@ using StackExchange.Redis;
 var builder = WebApplication.CreateBuilder(args);
 var postgreSqlConnectionString = ResolvePostgreSqlConnectionString(builder.Configuration);
 var redisConnectionString = ResolveRedisConnectionString(builder.Configuration);
+var executionPlanOptions = builder.Configuration.GetSection(ExecutionPlanOptions.SectionName).Get<ExecutionPlanOptions>()
+    ?? CreateDefaultExecutionPlanOptions();
 
 builder.Logging.Configure(options =>
 {
@@ -39,7 +41,11 @@ builder.Services.AddSingleton<IWorkflowEventPublisher, LoggingWorkflowEventPubli
 builder.Services.AddSingleton<IWorkflowStateMachine, WorkflowStateMachine>();
 builder.Services.AddSingleton<IWorkflowRunner, WorkflowRunner>();
 builder.Services.AddSingleton<ISqlParser, LightweightSqlParser>();
+builder.Services.AddSingleton(executionPlanOptions);
+builder.Services.AddSingleton<IExecutionPlanProvider, ExecutionPlanProvider>();
+builder.Services.AddSingleton<IExecutionPlanAnalyzer, ExecutionPlanAnalyzer>();
 builder.Services.AddSingleton<IWorkflowExecutor, SqlParserExecutor>();
+builder.Services.AddSingleton<IWorkflowExecutor, ExecutionPlanExecutor>();
 builder.Services.AddSingleton<MigrationReadinessState>();
 builder.Services.AddHostedService<EfMigrationHostedService>();
 builder.Services.AddHostedService<RunningWorkflowRecoveryHostedService>();
@@ -127,4 +133,29 @@ static string ResolveRedisConnectionString(IConfiguration configuration)
     }
 
     throw new InvalidOperationException("Missing Redis connection string: ConnectionStrings:redis or ConnectionStrings:Redis or DbOptimizer:ConnectionStrings:Redis");
+}
+
+static ExecutionPlanOptions CreateDefaultExecutionPlanOptions()
+{
+    return new ExecutionPlanOptions
+    {
+        MySql = new ExecutionPlanMcpServerOptions
+        {
+            Enabled = true,
+            Transport = "stdio",
+            Command = "npx",
+            Arguments = "-y @modelcontextprotocol/server-mysql"
+        },
+        PostgreSql = new ExecutionPlanMcpServerOptions
+        {
+            Enabled = true,
+            Transport = "stdio",
+            Command = "npx",
+            Arguments = "-y @modelcontextprotocol/server-postgres"
+        },
+        TimeoutSeconds = 30,
+        RetryCount = 2,
+        RetryDelayMilliseconds = 1000,
+        EnableDirectDbFallback = true
+    };
 }
