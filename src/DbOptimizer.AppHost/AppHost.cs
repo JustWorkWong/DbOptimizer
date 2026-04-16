@@ -1,26 +1,62 @@
+using Microsoft.Extensions.Configuration;
+using System.Globalization;
+
 var builder = DistributedApplication.CreateBuilder(args);
 
-var postgres = builder.AddPostgres("postgres")
-    .WithDataVolume()
-    .WithHostPort(5432);
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 
-var db = postgres.AddDatabase("dboptimizer");
+var postgresPort = GetRequiredPort("DbOptimizer:Databases:PostgreSql:Port");
+var mySqlPort = GetRequiredPort("DbOptimizer:Databases:MySql:Port");
+var redisPort = GetRequiredPort("DbOptimizer:Databases:Redis:Port");
+
+var postgresUser = builder.AddParameterFromConfiguration(
+    "postgres-username",
+    "DbOptimizer:Databases:PostgreSql:Username");
+var postgresPassword = builder.AddParameterFromConfiguration(
+    "postgres-password",
+    "DbOptimizer:Databases:PostgreSql:Password",
+    secret: true);
+var mySqlPassword = builder.AddParameterFromConfiguration(
+    "mysql-password",
+    "DbOptimizer:Databases:MySql:Password",
+    secret: true);
+
+var postgresInitDirectory = Path.Combine(builder.AppHostDirectory, "DatabaseInit", "postgresql");
+var mySqlInitDirectory = Path.Combine(builder.AppHostDirectory, "DatabaseInit", "mysql");
+
+var postgres = builder.AddPostgres("postgres", userName: postgresUser, password: postgresPassword, port: postgresPort)
+    .WithDataVolume()
+    .WithInitFiles(postgresInitDirectory);
+
+var postgresDatabaseName = GetRequiredValue("DbOptimizer:Databases:PostgreSql:Database");
+var postgresDb = postgres.AddDatabase("dboptimizer-postgres", postgresDatabaseName);
+
+var mySql = builder.AddMySql("mysql", password: mySqlPassword, port: mySqlPort)
+    .WithDataVolume()
+    .WithInitFiles(mySqlInitDirectory);
+
+var mySqlDatabaseName = GetRequiredValue("DbOptimizer:Databases:MySql:Database");
+var mySqlDb = mySql.AddDatabase("dboptimizer-mysql", mySqlDatabaseName);
 
 var redis = builder.AddRedis("redis")
     .WithDataVolume()
-    .WithHostPort(6379);
+    .WithHostPort(redisPort);
 
 var api = builder.AddProject<Projects.DbOptimizer_API>("api")
-    .WithReference(db)
+    .WithReference(postgresDb)
+    .WithReference(mySqlDb)
     .WithReference(redis)
     .WithHttpHealthCheck("/health")
-    .WaitFor(db)
+    .WaitFor(postgresDb)
+    .WaitFor(mySqlDb)
     .WaitFor(redis);
 
 builder.AddProject<Projects.DbOptimizer_AgentRuntime>("agentruntime")
-    .WithReference(db)
+    .WithReference(postgresDb)
+    .WithReference(mySqlDb)
     .WithReference(redis)
-    .WaitFor(db)
+    .WaitFor(postgresDb)
+    .WaitFor(mySqlDb)
     .WaitFor(redis);
 
 builder.AddViteApp("web", "../DbOptimizer.Web")
@@ -28,3 +64,27 @@ builder.AddViteApp("web", "../DbOptimizer.Web")
     .WaitFor(api);
 
 builder.Build().Run();
+
+return;
+
+int GetRequiredPort(string key)
+{
+    var value = GetRequiredValue(key);
+    if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedPort) || parsedPort <= 0)
+    {
+        throw new InvalidOperationException($"Configuration value '{key}' must be a positive integer.");
+    }
+
+    return parsedPort;
+}
+
+string GetRequiredValue(string key)
+{
+    var value = builder.Configuration[key];
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        throw new InvalidOperationException($"Missing required configuration value: {key}");
+    }
+
+    return value;
+}

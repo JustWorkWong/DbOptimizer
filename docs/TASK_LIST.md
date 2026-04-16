@@ -9,6 +9,11 @@
 - SSE 仅用于 AI 相关流程事件推送，非 AI 步骤通过普通 API 查询
 - 联调验收数据库使用 Aspire 创建的 PostgreSQL + MySQL 测试库（固定端口/账号/密码由测试环境配置文件统一管理，不在业务代码中写死；脚本初始化数据）
 
+**当前里程碑进展（2026-04-16）**：
+- [x] M0-03 可观测性与日志治理（requestId/sessionId/executionId 已落地）
+- [x] M0-04 AI Provider 接入配置（endpoint/model/apiKey/requestTimeout/maxTokens 配置化，支持本地密钥覆盖）
+- [x] M0-05 测试数据库编排与初始化（PostgreSQL + MySQL 编排与初始化脚本已接入）
+
 ---
 
 ## 1. 任务分解总览（P0 / P1）

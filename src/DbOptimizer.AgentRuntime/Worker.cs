@@ -8,6 +8,13 @@ public class Worker(ILogger<Worker> logger, RuntimeOptions runtimeOptions) : Bac
         {
             if (logger.IsEnabled(LogLevel.Information))
             {
+                using var scope = logger.BeginScope(new Dictionary<string, object>
+                {
+                    ["requestId"] = "-",
+                    ["sessionId"] = "runtime-heartbeat",
+                    ["executionId"] = "runtime-heartbeat"
+                });
+
                 logger.LogInformation(
                     "AgentRuntime heartbeat. AI Endpoint={AiEndpoint}, Model={AiModel}, MCP Timeout={McpTimeoutSeconds}s, Workflow Retry={WorkflowRetryCount}, RegenerationMaxRounds={RegenerationMaxRounds}",
                     runtimeOptions.Ai.Endpoint,
