@@ -7,6 +7,10 @@ using DbOptimizer.API.SlowQuery;
 using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
 using Microsoft.OpenApi.Models;
+using OpenTelemetry.Logs;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 var postgreSqlConnectionString = ResolvePostgreSqlConnectionString(builder.Configuration);
@@ -29,6 +33,51 @@ builder.Logging.Configure(options =>
         ActivityTrackingOptions.SpanId |
         ActivityTrackingOptions.ParentId;
 });
+
+/* =========================
+ * OpenTelemetry 配置
+ * - Logs/Metrics/Traces 统一导出到 Aspire Dashboard
+ * - 使用 OTLP 协议
+ * ========================= */
+var serviceName = "DbOptimizer.API";
+var serviceVersion = "1.0.0";
+var otlpEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"] ?? "http://localhost:4317";
+
+builder.Logging.AddOpenTelemetry(logging =>
+{
+    logging.SetResourceBuilder(ResourceBuilder.CreateDefault()
+        .AddService(serviceName, serviceVersion: serviceVersion));
+    logging.AddOtlpExporter(options =>
+    {
+        options.Endpoint = new Uri(otlpEndpoint);
+    });
+});
+
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource.AddService(serviceName, serviceVersion: serviceVersion))
+    .WithMetrics(metrics =>
+    {
+        metrics
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddMeter("DbOptimizer.*")
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri(otlpEndpoint);
+            });
+    })
+    .WithTracing(tracing =>
+    {
+        tracing
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddSource("DbOptimizer.*")
+            .AddOtlpExporter(options =>
+            {
+                options.Endpoint = new Uri(otlpEndpoint);
+            });
+    });
+
 
 builder.Services.AddCors(options =>
 {
