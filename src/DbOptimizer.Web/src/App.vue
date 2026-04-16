@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
+  createSqlAnalysis,
   createWorkflowEventSource,
   getDashboardStats,
   getHistoryDetail,
@@ -13,6 +14,7 @@ import {
   type DashboardStats,
   type HistoryDetail,
   type HistoryListItem,
+  type CreateSqlAnalysisPayload,
   type OptimizationReport,
   type ReviewDetail,
   type ReviewListItem,
@@ -24,7 +26,7 @@ import {
 const stats = ref<DashboardStats | null>(null)
 const reviews = ref<ReviewListItem[]>([])
 const selectedTaskId = ref('')
-const activeView = ref<'review' | 'history' | 'replay'>('review')
+const activeView = ref<'sql' | 'review' | 'history' | 'replay'>('sql')
 const selectedReview = ref<ReviewDetail | null>(null)
 const workflow = ref<WorkflowStatus | null>(null)
 const historyDetail = ref<HistoryDetail | null>(null)
@@ -38,6 +40,11 @@ const historyPageSize = ref(12)
 const historyTotal = ref(0)
 const historyStatusFilter = ref('')
 const historyTypeFilter = ref('')
+const sqlText = ref('SELECT * FROM users WHERE age > 18 ORDER BY created_at DESC;')
+const sqlDatabaseId = ref('mysql-local')
+const sqlDatabaseEngine = ref<'mysql' | 'postgresql'>('mysql')
+const sqlSessionId = ref('')
+const creatingSqlAnalysis = ref(false)
 const feedback = ref('')
 const errorMessage = ref('')
 const successMessage = ref('')
@@ -65,6 +72,21 @@ const report = computed<OptimizationReport | null>(() => {
 const currentReplayEvent = computed(() => replayEvents.value[replayIndex.value] ?? null)
 const historyHasPreviousPage = computed(() => historyPage.value > 1)
 const historyHasNextPage = computed(() => historyPage.value * historyPageSize.value < historyTotal.value)
+const progressEvents = computed(() =>
+  replayEvents.value.filter((item) =>
+    [
+      'WorkflowStarted',
+      'ExecutorStarted',
+      'ExecutorCompleted',
+      'ExecutorFailed',
+      'WorkflowWaitingReview',
+      'WorkflowCompleted',
+      'WorkflowCancelled',
+      'WorkflowFailed',
+    ].includes(item.eventType),
+  ),
+)
+const canOpenCurrentReview = computed(() => Boolean(workflow.value?.reviewId))
 
 onMounted(async () => {
   await Promise.all([loadDashboard(), loadReviews(), loadHistoryList()])
@@ -179,6 +201,97 @@ async function selectHistorySession(sessionId: string) {
   } catch (error) {
     errorMessage.value = getErrorText(error)
   }
+}
+
+async function startSqlAnalysis() {
+  if (!sqlText.value.trim()) {
+    errorMessage.value = '请先输入要分析的 SQL。'
+    return
+  }
+
+  creatingSqlAnalysis.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+  stopReplay()
+
+  try {
+    const payload: CreateSqlAnalysisPayload = {
+      sqlText: sqlText.value.trim(),
+      databaseId: sqlDatabaseId.value,
+      databaseEngine: sqlDatabaseEngine.value,
+      options: {
+        enableIndexRecommendation: true,
+        enableSqlRewrite: true,
+      },
+    }
+
+    const response = await createSqlAnalysis(payload)
+    sqlSessionId.value = response.sessionId
+    activeView.value = 'sql'
+    await openWorkflowSession(response.sessionId)
+    successMessage.value = `SQL 分析已启动：${response.sessionId}`
+  } catch (error) {
+    errorMessage.value = getErrorText(error)
+  } finally {
+    creatingSqlAnalysis.value = false
+  }
+}
+
+async function openWorkflowSession(sessionId: string) {
+  const loadId = ++currentLoadId.value
+  loadingDetail.value = true
+  resetReviewForm()
+  closeEventSource()
+  selectedReview.value = null
+  workspaceTaskId.value = ''
+  workflow.value = null
+  historyDetail.value = null
+  replayEvents.value = []
+  activeSessionId.value = sessionId
+  sqlSessionId.value = sessionId
+
+  try {
+    const latestWorkflow = await getWorkflow(sessionId)
+    if (loadId !== currentLoadId.value) return
+    workflow.value = latestWorkflow
+
+    const [history, replay] = await Promise.allSettled([
+      getHistoryDetail(sessionId),
+      getHistoryReplay(sessionId),
+    ])
+    if (loadId !== currentLoadId.value) return
+
+    historyDetail.value = history.status === 'fulfilled' ? history.value : null
+    replayEvents.value = replay.status === 'fulfilled' ? replay.value.events : []
+    connectToWorkflowEvents(sessionId, loadId)
+  } catch (error) {
+    if (loadId === currentLoadId.value) {
+      errorMessage.value = getErrorText(error)
+    }
+  } finally {
+    if (loadId === currentLoadId.value) {
+      loadingDetail.value = false
+    }
+  }
+}
+
+function clearSql() {
+  sqlText.value = ''
+}
+
+function loadSqlExample() {
+  sqlText.value = 'SELECT * FROM users WHERE age > 18 ORDER BY created_at DESC;'
+  sqlDatabaseId.value = 'mysql-local'
+  sqlDatabaseEngine.value = 'mysql'
+}
+
+async function jumpToCurrentReview() {
+  const reviewId = workflow.value?.reviewId
+  if (!reviewId) return
+
+  activeView.value = 'review'
+  selectedTaskId.value = reviewId
+  await loadReviews({ preserveWorkspace: true })
 }
 
 async function openReplaySession(sessionId: string) {
@@ -540,6 +653,9 @@ function getErrorText(error: unknown) {
     </header>
 
     <nav class="view-switcher" aria-label="workspace views">
+      <button type="button" class="view-tab" :class="{ active: activeView === 'sql' }" @click="activeView = 'sql'">
+        SQL 调优
+      </button>
       <button type="button" class="view-tab" :class="{ active: activeView === 'review' }" @click="activeView = 'review'">
         审核工作台
       </button>
@@ -551,7 +667,134 @@ function getErrorText(error: unknown) {
       </button>
     </nav>
 
-    <section v-if="activeView === 'review'" class="workspace-grid">
+    <section v-if="activeView === 'sql'" class="workspace-grid sql-grid">
+      <main class="panel review-detail">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">SQL Analysis</p>
+            <h2>SQL 调优</h2>
+          </div>
+          <button class="ghost-button" type="button" @click="loadSqlExample">导入示例</button>
+        </div>
+
+        <div class="filter-stack">
+          <label class="field-label">
+            数据库标识
+            <select v-model="sqlDatabaseId">
+              <option value="mysql-local">mysql-local</option>
+              <option value="postgres-local">postgres-local</option>
+            </select>
+          </label>
+          <label class="field-label">
+            数据库类型
+            <select v-model="sqlDatabaseEngine">
+              <option value="mysql">MySQL</option>
+              <option value="postgresql">PostgreSQL</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="field-label">
+          SQL 文本
+          <textarea
+            v-model="sqlText"
+            rows="12"
+            placeholder="输入要分析的 SQL，例如 SELECT * FROM users WHERE age > 18 ORDER BY created_at DESC;"
+          />
+        </label>
+
+        <div class="action-row">
+          <button class="primary-button" type="button" :disabled="creatingSqlAnalysis" @click="startSqlAnalysis">
+            {{ creatingSqlAnalysis ? '启动中…' : '开始分析' }}
+          </button>
+          <button class="ghost-button" type="button" @click="clearSql">清空</button>
+          <button
+            class="ghost-button"
+            type="button"
+            :disabled="!canOpenCurrentReview"
+            @click="jumpToCurrentReview"
+          >
+            前往审核
+          </button>
+        </div>
+
+        <div class="message-stack">
+          <p v-if="errorMessage" class="message error">{{ errorMessage }}</p>
+          <p v-if="successMessage" class="message success">{{ successMessage }}</p>
+        </div>
+
+        <section v-if="workflow" class="info-block">
+          <div class="block-head">
+            <h3>分析结果</h3>
+            <span class="status-chip" :data-tone="statusTone(workflow.status)">{{ workflow.status }}</span>
+          </div>
+
+          <div class="mini-grid">
+            <div>
+              <span class="mini-label">Session</span>
+              <code>{{ workflow.sessionId }}</code>
+            </div>
+            <div>
+              <span class="mini-label">当前执行器</span>
+              <strong>{{ workflow.currentExecutor ?? '—' }}</strong>
+            </div>
+            <div>
+              <span class="mini-label">进度</span>
+              <strong>{{ workflow.progress }}%</strong>
+            </div>
+          </div>
+
+          <p class="summary-text">{{ workflow.result?.summary ?? '分析进行中，结果会在工作流推进后显示。' }}</p>
+
+          <div v-if="workflow.result?.indexRecommendations?.length" class="executor-list">
+            <article
+              v-for="recommendation in workflow.result.indexRecommendations"
+              :key="`${recommendation.tableName}-${recommendation.createDdl}`"
+              class="recommendation-card"
+            >
+              <div class="recommendation-head">
+                <strong>{{ recommendation.tableName }}</strong>
+                <span>{{ formatPercent(recommendation.confidence) }}</span>
+              </div>
+              <p>{{ recommendation.reasoning }}</p>
+              <pre>{{ recommendation.createDdl }}</pre>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <aside class="panel live-panel">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Progress</p>
+            <h2>执行进度</h2>
+          </div>
+          <span class="status-chip" :data-tone="sseState === 'live' ? 'success' : sseState === 'error' ? 'danger' : 'info'">
+            {{ sseState }}
+          </span>
+        </div>
+
+        <div v-if="!workflow && !sqlSessionId" class="empty-state">
+          启动一次 SQL 分析后，这里会实时显示 workflow 状态和关键事件。
+        </div>
+
+        <div v-else class="timeline-list">
+          <article
+            v-for="event in progressEvents.slice().reverse()"
+            :key="`${event.sequence ?? event.timestamp}-${event.eventType}`"
+            class="timeline-item"
+          >
+            <div class="timeline-top">
+              <strong>{{ event.eventType }}</strong>
+              <span>#{{ event.sequence ?? '—' }}</span>
+            </div>
+            <p>{{ formatDateTime(event.timestamp) }}</p>
+          </article>
+        </div>
+      </aside>
+    </section>
+
+    <section v-else-if="activeView === 'review'" class="workspace-grid">
       <aside class="panel review-queue">
         <div class="panel-head">
           <div>

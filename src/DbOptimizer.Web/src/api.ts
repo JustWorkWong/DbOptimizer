@@ -55,6 +55,12 @@ export interface WorkflowStatus {
   errorMessage: string | null
 }
 
+export interface SqlAnalysisStartResponse {
+  sessionId: string
+  status: string
+  startedAt: string
+}
+
 export interface HistoryDetail {
   sessionId: string
   workflowType: string
@@ -151,6 +157,16 @@ export interface SubmitReviewPayload {
   adjustments?: Record<string, unknown>
 }
 
+export interface CreateSqlAnalysisPayload {
+  sqlText: string
+  databaseId: string
+  databaseEngine?: string
+  options?: {
+    enableIndexRecommendation?: boolean
+    enableSqlRewrite?: boolean
+  }
+}
+
 const apiBase = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, '') ?? ''
 
 async function fetchEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
@@ -200,6 +216,13 @@ export function submitReview(taskId: string, payload: SubmitReviewPayload) {
 
 export function getWorkflow(sessionId: string) {
   return fetchEnvelope<WorkflowStatus>(`/api/workflows/${sessionId}`)
+}
+
+export function createSqlAnalysis(payload: CreateSqlAnalysisPayload) {
+  return fetchEnvelope<SqlAnalysisStartResponse>('/api/workflows/sql-analysis', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export function getHistoryDetail(sessionId: string) {
