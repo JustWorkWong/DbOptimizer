@@ -148,13 +148,48 @@ internal sealed record HistoryDetailResponse(
     TokenUsageResponse? TokenUsage);
 
 internal sealed record HistoryExecutorResponse(
+    Guid ExecutionId,
     string ExecutorName,
+    string AgentName,
     string Status,
     DateTimeOffset StartedAt,
     DateTimeOffset? CompletedAt,
-    int Duration);
+    int Duration,
+    JsonElement? InputData,
+    JsonElement? OutputData,
+    TokenUsageResponse? TokenUsage,
+    IReadOnlyList<HistoryToolCallResponse> ToolCalls,
+    IReadOnlyList<HistoryDecisionResponse> Decisions,
+    IReadOnlyList<HistoryErrorResponse> Errors);
 
-internal sealed record TokenUsageResponse(int Prompt, int Completion, int Total, decimal Cost);
+internal sealed record HistoryToolCallResponse(
+    Guid CallId,
+    string ToolName,
+    string Status,
+    DateTimeOffset StartedAt,
+    DateTimeOffset? CompletedAt,
+    int Duration,
+    JsonElement? Arguments,
+    JsonElement? Result,
+    string? ErrorMessage);
+
+internal sealed record HistoryDecisionResponse(
+    Guid DecisionId,
+    string DecisionType,
+    string Reasoning,
+    decimal Confidence,
+    DateTimeOffset CreatedAt,
+    JsonElement? Evidence);
+
+internal sealed record HistoryErrorResponse(
+    Guid LogId,
+    string ErrorType,
+    string ErrorMessage,
+    DateTimeOffset CreatedAt,
+    string? StackTrace,
+    JsonElement? Context);
+
+internal sealed record TokenUsageResponse(int Prompt, int Completion, int Total, decimal Cost, string? Source = null);
 
 internal sealed record HistoryReplayResponse(Guid SessionId, IReadOnlyList<HistoryReplayEventResponse> Events);
 
@@ -309,11 +344,24 @@ internal sealed class HistoryQueryService(
 
         var checkpoint = WorkflowCheckpointJson.Deserialize(session.State);
         var result = TryGetFinalResult(checkpoint);
-        var events = MergeEvents(checkpoint, workflowEventQueryService.GetEvents(sessionId, 0, 2048));
-        var executors = BuildExecutors(events);
         var duration = session.CompletedAt.HasValue
             ? (int)Math.Round((session.CompletedAt.Value - session.CreatedAt).TotalSeconds, MidpointRounding.AwayFromZero)
             : 0;
+
+        var executions = await dbContext.AgentExecutions
+            .AsNoTracking()
+            .Where(item => item.SessionId == sessionId)
+            .Include(item => item.ToolCalls)
+            .Include(item => item.DecisionRecords)
+            .Include(item => item.ErrorLogs)
+            .OrderBy(item => item.StartedAt)
+            .ToListAsync(cancellationToken);
+
+        var executorResponses = executions.Count > 0
+            ? executions.Select(BuildExecutorResponse).ToArray()
+            : BuildExecutorsFromEvents(MergeEvents(checkpoint, workflowEventQueryService.GetEvents(sessionId, 0, 2048)));
+
+        var tokenUsage = AggregateTokenUsage(executorResponses);
 
         return new HistoryDetailResponse(
             session.SessionId,
@@ -322,9 +370,9 @@ internal sealed class HistoryQueryService(
             session.CreatedAt,
             session.CompletedAt,
             duration,
-            executors,
+            executorResponses,
             result,
-            null);
+            tokenUsage);
     }
 
     public async Task<HistoryReplayResponse?> GetHistoryReplayAsync(Guid sessionId, CancellationToken cancellationToken = default)
@@ -353,18 +401,61 @@ internal sealed class HistoryQueryService(
         return new HistoryReplayResponse(sessionId, events);
     }
 
-    private static OptimizationReport? TryGetFinalResult(WorkflowCheckpoint? checkpoint)
+    private static HistoryExecutorResponse BuildExecutorResponse(AgentExecutionEntity execution)
     {
-        if (checkpoint is null ||
-            !checkpoint.Context.TryGetValue(WorkflowContextKeys.FinalResult, out var resultElement))
-        {
-            return null;
-        }
+        var duration = execution.CompletedAt.HasValue
+            ? (int)Math.Round((execution.CompletedAt.Value - execution.StartedAt).TotalSeconds, MidpointRounding.AwayFromZero)
+            : 0;
 
-        return resultElement.Deserialize<OptimizationReport>(WorkflowCheckpointJson.SerializerOptions);
+        return new HistoryExecutorResponse(
+            execution.ExecutionId,
+            execution.ExecutorName,
+            execution.AgentName,
+            execution.Status,
+            execution.StartedAt,
+            execution.CompletedAt,
+            duration,
+            ParseJsonElement(execution.InputData),
+            ParseJsonElement(execution.OutputData),
+            ParseTokenUsage(execution.TokenUsage),
+            execution.ToolCalls
+                .OrderBy(item => item.StartedAt)
+                .Select(item => new HistoryToolCallResponse(
+                    item.CallId,
+                    item.ToolName,
+                    item.Status,
+                    item.StartedAt,
+                    item.CompletedAt,
+                    item.CompletedAt.HasValue
+                        ? (int)Math.Round((item.CompletedAt.Value - item.StartedAt).TotalSeconds, MidpointRounding.AwayFromZero)
+                        : 0,
+                    ParseJsonElement(item.Arguments),
+                    ParseJsonElement(item.Result),
+                    item.ErrorMessage))
+                .ToArray(),
+            execution.DecisionRecords
+                .OrderBy(item => item.CreatedAt)
+                .Select(item => new HistoryDecisionResponse(
+                    item.DecisionId,
+                    item.DecisionType,
+                    item.Reasoning,
+                    item.Confidence,
+                    item.CreatedAt,
+                    ParseJsonElement(item.Evidence)))
+                .ToArray(),
+            execution.ErrorLogs
+                .OrderBy(item => item.CreatedAt)
+                .Select(item => new HistoryErrorResponse(
+                    item.LogId,
+                    item.ErrorType,
+                    item.ErrorMessage,
+                    item.CreatedAt,
+                    item.StackTrace,
+                    ParseJsonElement(item.Context)))
+                .ToArray());
     }
 
-    private static IReadOnlyList<HistoryExecutorResponse> BuildExecutors(IReadOnlyList<WorkflowEventRecord> events)
+    private static IReadOnlyList<HistoryExecutorResponse> BuildExecutorsFromEvents(IReadOnlyList<WorkflowEventRecord> events)
     {
         var executions = new List<MutableExecutorTimeline>();
 
@@ -378,15 +469,13 @@ internal sealed class HistoryQueryService(
             switch (item.EventType)
             {
                 case WorkflowEventType.ExecutorStarted:
-                {
-                    var timeline = new MutableExecutorTimeline(executorName)
+                    executions.Add(new MutableExecutorTimeline(executorName)
                     {
                         StartedAt = item.Timestamp,
-                        Status = "Running"
-                    };
-                    executions.Add(timeline);
+                        Status = "Running",
+                        InputData = item.Payload
+                    });
                     break;
-                }
                 case WorkflowEventType.ExecutorCompleted:
                 {
                     var timeline = FindOpenExecution(executions, executorName);
@@ -397,6 +486,8 @@ internal sealed class HistoryQueryService(
 
                     timeline.CompletedAt = item.Timestamp;
                     timeline.Status = "Completed";
+                    timeline.OutputData = item.Payload;
+                    timeline.TokenUsage = TryGetTokenUsage(item.Payload);
                     break;
                 }
                 case WorkflowEventType.ExecutorFailed:
@@ -409,6 +500,8 @@ internal sealed class HistoryQueryService(
 
                     timeline.CompletedAt = item.Timestamp;
                     timeline.Status = "Failed";
+                    timeline.OutputData = item.Payload;
+                    timeline.TokenUsage = TryGetTokenUsage(item.Payload);
                     break;
                 }
             }
@@ -417,23 +510,54 @@ internal sealed class HistoryQueryService(
         return executions
             .OrderBy(item => item.StartedAt ?? DateTimeOffset.MinValue)
             .Select(item => new HistoryExecutorResponse(
+                item.ExecutionId,
+                item.ExecutorName,
                 item.ExecutorName,
                 item.Status,
                 item.StartedAt ?? DateTimeOffset.MinValue,
                 item.CompletedAt,
                 item.StartedAt.HasValue && item.CompletedAt.HasValue
                     ? (int)Math.Round((item.CompletedAt.Value - item.StartedAt.Value).TotalSeconds, MidpointRounding.AwayFromZero)
-                    : 0))
+                    : 0,
+                item.InputData,
+                item.OutputData,
+                item.TokenUsage,
+                [],
+                [],
+                []))
             .ToArray();
     }
 
-    private static MutableExecutorTimeline? FindOpenExecution(
-        IReadOnlyList<MutableExecutorTimeline> executions,
-        string executorName)
+    private static TokenUsageResponse? AggregateTokenUsage(IEnumerable<HistoryExecutorResponse> executors)
     {
-        return executions.LastOrDefault(item =>
-            string.Equals(item.ExecutorName, executorName, StringComparison.Ordinal) &&
-            item.CompletedAt is null);
+        var usageItems = executors
+            .Select(item => item.TokenUsage)
+            .Where(item => item is not null)
+            .Cast<TokenUsageResponse>()
+            .ToArray();
+
+        if (usageItems.Length == 0)
+        {
+            return null;
+        }
+
+        return new TokenUsageResponse(
+            usageItems.Sum(item => item.Prompt),
+            usageItems.Sum(item => item.Completion),
+            usageItems.Sum(item => item.Total),
+            usageItems.Sum(item => item.Cost),
+            "aggregated");
+    }
+
+    private static OptimizationReport? TryGetFinalResult(WorkflowCheckpoint? checkpoint)
+    {
+        if (checkpoint is null ||
+            !checkpoint.Context.TryGetValue(WorkflowContextKeys.FinalResult, out var resultElement))
+        {
+            return null;
+        }
+
+        return resultElement.Deserialize<OptimizationReport>(WorkflowCheckpointJson.SerializerOptions);
     }
 
     private static IReadOnlyList<WorkflowEventRecord> MergeEvents(
@@ -449,6 +573,15 @@ internal sealed class HistoryQueryService(
             .ToArray();
     }
 
+    private static MutableExecutorTimeline? FindOpenExecution(
+        IReadOnlyList<MutableExecutorTimeline> executions,
+        string executorName)
+    {
+        return executions.LastOrDefault(item =>
+            string.Equals(item.ExecutorName, executorName, StringComparison.Ordinal) &&
+            item.CompletedAt is null);
+    }
+
     private static bool TryGetExecutorName(WorkflowEventRecord record, out string executorName)
     {
         executorName = string.Empty;
@@ -462,8 +595,98 @@ internal sealed class HistoryQueryService(
         return !string.IsNullOrWhiteSpace(executorName);
     }
 
+    private static JsonElement? ParseJsonElement(string? rawJson)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawJson);
+            return document.RootElement.Clone();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static TokenUsageResponse? ParseTokenUsage(string? rawJson)
+    {
+        var element = ParseJsonElement(rawJson);
+        return element.HasValue ? ParseTokenUsage(element.Value) : null;
+    }
+
+    private static TokenUsageResponse? TryGetTokenUsage(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("tokenUsage", out var tokenUsageElement))
+        {
+            return null;
+        }
+
+        return ParseTokenUsage(tokenUsageElement);
+    }
+
+    private static TokenUsageResponse? ParseTokenUsage(JsonElement tokenUsageElement)
+    {
+        if (tokenUsageElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (!TryReadInt(tokenUsageElement, "prompt", out var prompt) ||
+            !TryReadInt(tokenUsageElement, "completion", out var completion) ||
+            !TryReadInt(tokenUsageElement, "total", out var total))
+        {
+            return null;
+        }
+
+        _ = TryReadDecimal(tokenUsageElement, "cost", out var cost);
+        var source = tokenUsageElement.TryGetProperty("source", out var sourceElement)
+            ? sourceElement.GetString()
+            : null;
+
+        return new TokenUsageResponse(prompt, completion, total, cost, source);
+    }
+
+    private static bool TryReadInt(JsonElement element, string propertyName, out int value)
+    {
+        value = 0;
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return false;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.Number => property.TryGetInt32(out value),
+            JsonValueKind.String => int.TryParse(property.GetString(), out value),
+            _ => false
+        };
+    }
+
+    private static bool TryReadDecimal(JsonElement element, string propertyName, out decimal value)
+    {
+        value = 0m;
+        if (!element.TryGetProperty(propertyName, out var property))
+        {
+            return false;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.Number => property.TryGetDecimal(out value),
+            JsonValueKind.String => decimal.TryParse(property.GetString(), out value),
+            _ => false
+        };
+    }
+
     private sealed class MutableExecutorTimeline(string executorName)
     {
+        public Guid ExecutionId { get; } = Guid.NewGuid();
+
         public string ExecutorName { get; } = executorName;
 
         public string Status { get; set; } = "Pending";
@@ -471,5 +694,11 @@ internal sealed class HistoryQueryService(
         public DateTimeOffset? StartedAt { get; set; }
 
         public DateTimeOffset? CompletedAt { get; set; }
+
+        public JsonElement? InputData { get; set; }
+
+        public JsonElement? OutputData { get; set; }
+
+        public TokenUsageResponse? TokenUsage { get; set; }
     }
 }

@@ -128,6 +128,7 @@ internal sealed class WorkflowExecutionAuditService(
                 durationMs = (long)(completedAt - startedAt).TotalMilliseconds,
                 output = result.Output
             });
+            entity.TokenUsage = Serialize(BuildTokenUsage(result.Output));
             entity.ErrorMessage = null;
 
             var toolCalls = BuildToolCalls(context, executionId.Value, executorName, startedAt, completedAt, result.Output);
@@ -196,6 +197,7 @@ internal sealed class WorkflowExecutionAuditService(
                 durationMs = (long)(completedAt - startedAt).TotalMilliseconds,
                 output
             });
+            entity.TokenUsage = Serialize(BuildTokenUsage(output));
             entity.ErrorMessage = errorMessage;
 
             dbContext.ErrorLogs.Add(new ErrorLogEntity
@@ -259,6 +261,7 @@ internal sealed class WorkflowExecutionAuditService(
             {
                 durationMs = (long)(completedAt - startedAt).TotalMilliseconds
             });
+            entity.TokenUsage = Serialize(BuildTokenUsage(null));
 
             await dbContext.SaveChangesAsync(cancellationToken);
         }
@@ -560,6 +563,209 @@ internal sealed class WorkflowExecutionAuditService(
     {
         var percent = value <= 1 ? value * 100 : value;
         return decimal.Round((decimal)Math.Clamp(percent, 0, 100), 2, MidpointRounding.AwayFromZero);
+    }
+
+    private static object BuildTokenUsage(object? output)
+    {
+        if (TryExtractTokenUsage(output, out var usage))
+        {
+            return usage;
+        }
+
+        return new
+        {
+            prompt = 0,
+            completion = 0,
+            total = 0,
+            cost = 0m,
+            available = false,
+            source = "not_available"
+        };
+    }
+
+    private static bool TryExtractTokenUsage(object? output, out object usage)
+    {
+        usage = null!;
+        if (output is null)
+        {
+            return false;
+        }
+
+        if (output is OptimizationReport report &&
+            TryExtractTokenUsageFromMetadata(report.Metadata, out usage))
+        {
+            return true;
+        }
+
+        if (output is ConfigOptimizationReport configReport &&
+            TryExtractTokenUsageFromMetadata(configReport.Metadata, out usage))
+        {
+            return true;
+        }
+
+        if (output is IReadOnlyDictionary<string, object> dictionary &&
+            TryExtractTokenUsageFromMetadata(dictionary, out usage))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryExtractTokenUsageFromMetadata(
+        IReadOnlyDictionary<string, object> metadata,
+        out object usage)
+    {
+        usage = null!;
+        if (!metadata.TryGetValue("tokenUsage", out var rawTokenUsage) || rawTokenUsage is null)
+        {
+            return false;
+        }
+
+        if (rawTokenUsage is JsonElement jsonElement &&
+            TryParseTokenUsageFromJsonElement(jsonElement, out usage))
+        {
+            return true;
+        }
+
+        if (rawTokenUsage is IReadOnlyDictionary<string, object> nestedDictionary &&
+            TryParseTokenUsageFromDictionary(nestedDictionary, out usage))
+        {
+            return true;
+        }
+
+        if (rawTokenUsage is Dictionary<string, object> plainDictionary &&
+            TryParseTokenUsageFromDictionary(plainDictionary, out usage))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryParseTokenUsageFromDictionary(
+        IReadOnlyDictionary<string, object> dictionary,
+        out object usage)
+    {
+        usage = null!;
+        if (!TryGetInt(dictionary, "prompt", out var prompt))
+        {
+            return false;
+        }
+
+        TryGetInt(dictionary, "completion", out var completion);
+        TryGetInt(dictionary, "total", out var total);
+        TryGetDecimal(dictionary, "cost", out var cost);
+
+        usage = new
+        {
+            prompt,
+            completion,
+            total = total == 0 ? prompt + completion : total,
+            cost,
+            available = true,
+            source = "metadata"
+        };
+        return true;
+    }
+
+    private static bool TryParseTokenUsageFromJsonElement(JsonElement element, out object usage)
+    {
+        usage = null!;
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!TryGetInt(element, "prompt", out var prompt))
+        {
+            return false;
+        }
+
+        TryGetInt(element, "completion", out var completion);
+        TryGetInt(element, "total", out var total);
+        TryGetDecimal(element, "cost", out var cost);
+
+        usage = new
+        {
+            prompt,
+            completion,
+            total = total == 0 ? prompt + completion : total,
+            cost,
+            available = true,
+            source = "metadata"
+        };
+        return true;
+    }
+
+    private static bool TryGetInt(IReadOnlyDictionary<string, object> dictionary, string key, out int value)
+    {
+        value = 0;
+        if (!dictionary.TryGetValue(key, out var rawValue) || rawValue is null)
+        {
+            return false;
+        }
+
+        return rawValue switch
+        {
+            int intValue => (value = intValue) >= 0,
+            long longValue => (value = (int)longValue) >= 0,
+            JsonElement jsonElement when TryGetInt(jsonElement, out var parsed) => (value = parsed) >= 0,
+            _ when int.TryParse(rawValue.ToString(), out var parsed) => (value = parsed) >= 0,
+            _ => false
+        };
+    }
+
+    private static bool TryGetDecimal(IReadOnlyDictionary<string, object> dictionary, string key, out decimal value)
+    {
+        value = 0;
+        if (!dictionary.TryGetValue(key, out var rawValue) || rawValue is null)
+        {
+            return false;
+        }
+
+        return rawValue switch
+        {
+            decimal decimalValue => (value = decimalValue) >= 0,
+            double doubleValue => (value = (decimal)doubleValue) >= 0,
+            JsonElement jsonElement when TryGetDecimal(jsonElement, out var parsed) => (value = parsed) >= 0,
+            _ when decimal.TryParse(rawValue.ToString(), out var parsed) => (value = parsed) >= 0,
+            _ => false
+        };
+    }
+
+    private static bool TryGetInt(JsonElement element, string key, out int value)
+    {
+        value = 0;
+        return element.TryGetProperty(key, out var property) && TryGetInt(property, out value);
+    }
+
+    private static bool TryGetInt(JsonElement element, out int value)
+    {
+        value = 0;
+        return element.ValueKind switch
+        {
+            JsonValueKind.Number => element.TryGetInt32(out value),
+            JsonValueKind.String => int.TryParse(element.GetString(), out value),
+            _ => false
+        };
+    }
+
+    private static bool TryGetDecimal(JsonElement element, string key, out decimal value)
+    {
+        value = 0;
+        return element.TryGetProperty(key, out var property) && TryGetDecimal(property, out value);
+    }
+
+    private static bool TryGetDecimal(JsonElement element, out decimal value)
+    {
+        value = 0;
+        return element.ValueKind switch
+        {
+            JsonValueKind.Number => element.TryGetDecimal(out value),
+            JsonValueKind.String => decimal.TryParse(element.GetString(), out value),
+            _ => false
+        };
     }
 
     private static T? TryGetValue<T>(WorkflowContext context, string key)
