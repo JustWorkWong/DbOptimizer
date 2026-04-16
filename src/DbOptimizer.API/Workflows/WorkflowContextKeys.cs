@@ -14,6 +14,7 @@ internal static class WorkflowContextKeys
     public const string SqlParserInput = "SqlParserInput";
     public const string ParsedSql = "ParsedSql";
     public const string ExecutionPlan = "ExecutionPlan";
+    public const string TableIndexMetadata = "TableIndexMetadata";
     public const string IndexRecommendations = "IndexRecommendations";
     public const string FinalResult = "FinalResult";
     public const string ReviewId = "ReviewId";

@@ -1,5 +1,8 @@
 using Microsoft.Extensions.Configuration;
 using System.Globalization;
+using Aspire.Hosting.MySql;
+using Aspire.Hosting.Postgres;
+using Aspire.Hosting.Redis;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -8,6 +11,9 @@ builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, relo
 var postgresPort = GetRequiredPort("DbOptimizer:Databases:PostgreSql:Port");
 var mySqlPort = GetRequiredPort("DbOptimizer:Databases:MySql:Port");
 var redisPort = GetRequiredPort("DbOptimizer:Databases:Redis:Port");
+const int pgAdminPort = 15050;
+const int phpMyAdminPort = 15051;
+const int redisInsightPort = 15540;
 
 var postgresUser = builder.AddParameterFromConfiguration(
     "postgres-username",
@@ -26,21 +32,33 @@ var mySqlInitDirectory = Path.Combine(builder.AppHostDirectory, "DatabaseInit", 
 
 var postgres = builder.AddPostgres("postgres", userName: postgresUser, password: postgresPassword, port: postgresPort)
     .WithDataVolume()
-    .WithInitFiles(postgresInitDirectory);
+    .WithInitFiles(postgresInitDirectory)
+    .WithPgAdmin(pgAdmin =>
+    {
+        pgAdmin.WithHostPort(pgAdminPort);
+    });
 
 var postgresDatabaseName = GetRequiredValue("DbOptimizer:Databases:PostgreSql:Database");
 var postgresDb = postgres.AddDatabase("dboptimizer-postgres", postgresDatabaseName);
 
 var mySql = builder.AddMySql("mysql", password: mySqlPassword, port: mySqlPort)
     .WithDataVolume()
-    .WithInitFiles(mySqlInitDirectory);
+    .WithInitFiles(mySqlInitDirectory)
+    .WithPhpMyAdmin(phpMyAdmin =>
+    {
+        phpMyAdmin.WithHostPort(phpMyAdminPort);
+    });
 
 var mySqlDatabaseName = GetRequiredValue("DbOptimizer:Databases:MySql:Database");
 var mySqlDb = mySql.AddDatabase("dboptimizer-mysql", mySqlDatabaseName);
 
 var redis = builder.AddRedis("redis")
     .WithDataVolume()
-    .WithHostPort(redisPort);
+    .WithHostPort(redisPort)
+    .WithRedisInsight(redisInsight =>
+    {
+        redisInsight.WithHostPort(redisInsightPort);
+    });
 
 var api = builder.AddProject<Projects.DbOptimizer_API>("api")
     .WithReference(postgresDb)

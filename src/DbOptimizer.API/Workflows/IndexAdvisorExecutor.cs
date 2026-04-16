@@ -40,6 +40,8 @@ internal sealed class IndexAdvisorExecutor(
             tableIndexes[table] = tableIndexMetadataAnalyzer.Analyze(table, invocationResult);
         }
 
+        context.Set(WorkflowContextKeys.TableIndexMetadata, tableIndexes);
+
         var recommendations = indexRecommendationGenerator.Generate(
             databaseEngine,
             parsedSql,
