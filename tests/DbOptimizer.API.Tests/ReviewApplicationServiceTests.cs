@@ -132,6 +132,7 @@ public sealed class ReviewApplicationServiceTests
                 DbContextFactory,
                 CheckpointStorage,
                 WorkflowExecutionScheduler,
+                new WorkflowResultSerializer(),
                 WorkflowEventPublisher);
         }
 

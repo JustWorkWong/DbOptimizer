@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DbOptimizer.Core.Models;
 using DbOptimizer.Infrastructure.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
@@ -144,7 +145,7 @@ internal sealed record HistoryDetailResponse(
     DateTimeOffset? CompletedAt,
     int Duration,
     IReadOnlyList<HistoryExecutorResponse> Executors,
-    OptimizationReport? Result,
+    WorkflowResultEnvelope? Result,
     TokenUsageResponse? TokenUsage);
 
 internal sealed record HistoryExecutorResponse(
@@ -215,6 +216,7 @@ internal interface IHistoryQueryService
 
 internal sealed class HistoryQueryService(
     IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
+    IWorkflowResultSerializer workflowResultSerializer,
     IWorkflowEventQueryService workflowEventQueryService) : IHistoryQueryService
 {
     public async Task<DashboardStatsResponse> GetDashboardStatsAsync(CancellationToken cancellationToken = default)
@@ -311,7 +313,9 @@ internal sealed class HistoryQueryService(
             {
                 var checkpoint = WorkflowCheckpointJson.Deserialize(item.State);
                 var report = TryGetFinalResult(checkpoint);
-                var recommendationCount = report?.IndexRecommendations.Count ?? 0;
+                var recommendationCount = report is null
+                    ? 0
+                    : workflowResultSerializer.GetRecommendationCount(item.WorkflowType, report.Value);
                 var duration = item.CompletedAt.HasValue
                     ? (int)Math.Round((item.CompletedAt.Value - item.CreatedAt).TotalSeconds, MidpointRounding.AwayFromZero)
                     : 0;
@@ -343,6 +347,14 @@ internal sealed class HistoryQueryService(
         }
 
         var checkpoint = WorkflowCheckpointJson.Deserialize(session.State);
+        JsonElement databaseIdElement = default;
+        JsonElement databaseTypeElement = default;
+        if (checkpoint is not null)
+        {
+            checkpoint.Context.TryGetValue(WorkflowContextKeys.DatabaseId, out databaseIdElement);
+            checkpoint.Context.TryGetValue(WorkflowContextKeys.DatabaseType, out databaseTypeElement);
+        }
+
         var result = TryGetFinalResult(checkpoint);
         var duration = session.CompletedAt.HasValue
             ? (int)Math.Round((session.CompletedAt.Value - session.CreatedAt).TotalSeconds, MidpointRounding.AwayFromZero)
@@ -371,7 +383,13 @@ internal sealed class HistoryQueryService(
             session.CompletedAt,
             duration,
             executorResponses,
-            result,
+            result is null
+                ? null
+                : workflowResultSerializer.ToEnvelope(
+                    session.WorkflowType,
+                    result.Value,
+                    databaseIdElement.ValueKind == default ? null : databaseIdElement.Deserialize<string>(),
+                    databaseTypeElement.ValueKind == default ? null : databaseTypeElement.Deserialize<string>()),
             tokenUsage);
     }
 
@@ -549,7 +567,7 @@ internal sealed class HistoryQueryService(
             "aggregated");
     }
 
-    private static OptimizationReport? TryGetFinalResult(WorkflowCheckpoint? checkpoint)
+    private static JsonElement? TryGetFinalResult(WorkflowCheckpoint? checkpoint)
     {
         if (checkpoint is null ||
             !checkpoint.Context.TryGetValue(WorkflowContextKeys.FinalResult, out var resultElement))
@@ -557,7 +575,7 @@ internal sealed class HistoryQueryService(
             return null;
         }
 
-        return resultElement.Deserialize<OptimizationReport>(WorkflowCheckpointJson.SerializerOptions);
+        return resultElement;
     }
 
     private static IReadOnlyList<WorkflowEventRecord> MergeEvents(

@@ -28,7 +28,7 @@ public sealed class WorkflowQueryServiceTests
                 [WorkflowContextKeys.ReviewStatus] = "Pending"
             });
 
-        var service = new WorkflowQueryService(new StubCheckpointStorage(checkpoint));
+        var service = new WorkflowQueryService(new StubCheckpointStorage(checkpoint), new WorkflowResultSerializer());
 
         var response = await service.GetAsync(sessionId);
 
@@ -37,6 +37,7 @@ public sealed class WorkflowQueryServiceTests
         Assert.Equal("HumanReviewExecutor", response.CurrentExecutor);
         Assert.Equal(67, response.Progress);
         Assert.NotNull(response.Result);
+        Assert.Equal("sql-optimization-report", response.Result!.ResultType);
         Assert.Equal("summary", response.Result!.Summary);
         Assert.Equal(Guid.Parse("11111111-1111-1111-1111-111111111111"), response.ReviewId);
         Assert.Equal("Pending", response.ReviewStatus);
@@ -55,7 +56,7 @@ public sealed class WorkflowQueryServiceTests
                 ["LastError"] = "none"
             });
 
-        var service = new WorkflowQueryService(new StubCheckpointStorage(checkpoint));
+        var service = new WorkflowQueryService(new StubCheckpointStorage(checkpoint), new WorkflowResultSerializer());
 
         var response = await service.GetAsync(sessionId);
 

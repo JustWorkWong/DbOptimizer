@@ -130,6 +130,7 @@ builder.Services.AddSingleton<IWorkflowExecutionAuditService, WorkflowExecutionA
 builder.Services.AddSingleton<IWorkflowRunner, WorkflowRunner>();
 builder.Services.AddSingleton<IWorkflowExecutionScheduler, WorkflowExecutionScheduler>();
 builder.Services.AddSingleton<IWorkflowQueryService, WorkflowQueryService>();
+builder.Services.AddSingleton<IWorkflowResultSerializer, WorkflowResultSerializer>();
 builder.Services.AddSingleton<IReviewApplicationService, ReviewApplicationService>();
 builder.Services.AddSingleton<IHistoryQueryService, HistoryQueryService>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.ISqlParser, DbOptimizer.Infrastructure.Workflows.LightweightSqlParser>();

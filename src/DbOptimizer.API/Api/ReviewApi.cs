@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DbOptimizer.Core.Models;
 using DbOptimizer.Infrastructure.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
@@ -99,7 +100,7 @@ internal sealed record ReviewListItemResponse(
     Guid SessionId,
     string WorkflowType,
     string Status,
-    OptimizationReport Recommendations,
+    WorkflowResultEnvelope Recommendations,
     DateTimeOffset CreatedAt);
 
 internal sealed record ReviewDetailResponse(
@@ -107,7 +108,7 @@ internal sealed record ReviewDetailResponse(
     Guid SessionId,
     string WorkflowType,
     string Status,
-    OptimizationReport Recommendations,
+    WorkflowResultEnvelope Recommendations,
     string? ReviewerComment,
     Dictionary<string, JsonElement>? Adjustments,
     DateTimeOffset CreatedAt,
@@ -135,6 +136,7 @@ internal sealed class ReviewApplicationService(
     IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
     ICheckpointStorage checkpointStorage,
     IWorkflowExecutionScheduler workflowExecutionScheduler,
+    IWorkflowResultSerializer workflowResultSerializer,
     IWorkflowEventPublisher workflowEventPublisher) : IReviewApplicationService
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
@@ -174,7 +176,7 @@ internal sealed class ReviewApplicationService(
                 entity.SessionId,
                 entity.Session.WorkflowType,
                 entity.Status,
-                DeserializeReport(entity.Recommendations),
+                DeserializeReport(entity.Session.WorkflowType, entity.Recommendations),
                 entity.CreatedAt))
             .ToArray();
 
@@ -203,7 +205,7 @@ internal sealed class ReviewApplicationService(
             entity.SessionId,
             entity.Session.WorkflowType,
             entity.Status,
-            DeserializeReport(entity.Recommendations),
+            DeserializeReport(entity.Session.WorkflowType, entity.Recommendations),
             entity.ReviewerComment,
             DeserializeAdjustments(entity.Adjustments),
             entity.CreatedAt,
@@ -482,9 +484,9 @@ internal sealed class ReviewApplicationService(
         };
     }
 
-    private static OptimizationReport DeserializeReport(string json)
+    private WorkflowResultEnvelope DeserializeReport(string workflowType, string json)
     {
-        return JsonSerializer.Deserialize<OptimizationReport>(json, SerializerOptions) ?? new OptimizationReport();
+        return workflowResultSerializer.ToEnvelope(workflowType, json);
     }
 
     private static Dictionary<string, JsonElement>? DeserializeAdjustments(string? json)

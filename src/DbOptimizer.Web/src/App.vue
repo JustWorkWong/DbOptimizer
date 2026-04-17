@@ -19,6 +19,7 @@ import {
   type ReviewDetail,
   type ReviewListItem,
   type SubmitReviewPayload,
+  type WorkflowResultEnvelope,
   type WorkflowStatus,
   type WorkflowStreamEvent,
 } from './api'
@@ -65,8 +66,17 @@ const replayPlaying = ref(false)
 let eventSource: EventSource | null = null
 let replayTimer: number | null = null
 
-const report = computed<OptimizationReport | null>(() => {
+const resultEnvelope = computed<WorkflowResultEnvelope | null>(() => {
   return workflow.value?.result ?? historyDetail.value?.result ?? selectedReview.value?.recommendations ?? null
+})
+
+const report = computed<OptimizationReport | null>(() => {
+  const current = resultEnvelope.value
+  if (!current || current.resultType !== 'sql-optimization-report') {
+    return null
+  }
+
+  return current.data as unknown as OptimizationReport
 })
 
 const currentReplayEvent = computed(() => replayEvents.value[replayIndex.value] ?? null)
@@ -132,8 +142,8 @@ const workflowProgressSummary = computed(() => {
     return `任务失败：${workflow.value.errorMessage}`
   }
 
-  if (workflow.value?.result?.summary) {
-    return workflow.value.result.summary
+  if (resultEnvelope.value?.summary) {
+    return resultEnvelope.value.summary
   }
 
   if (latestProgressEvent.value) {
@@ -1018,9 +1028,9 @@ function getErrorText(error: unknown) {
 
           <p class="summary-text">{{ workflowProgressSummary }}</p>
 
-          <div v-if="workflow.result?.indexRecommendations?.length" class="executor-list">
+          <div v-if="report?.indexRecommendations?.length" class="executor-list">
             <article
-              v-for="recommendation in workflow.result.indexRecommendations"
+              v-for="recommendation in report.indexRecommendations"
               :key="`${recommendation.tableName}-${recommendation.createDdl}`"
               class="recommendation-card"
             >
@@ -1032,6 +1042,8 @@ function getErrorText(error: unknown) {
               <pre>{{ recommendation.createDdl }}</pre>
             </article>
           </div>
+
+          <pre v-else-if="resultEnvelope">{{ formatJsonBlock(resultEnvelope.data) }}</pre>
         </section>
       </main>
 
@@ -1162,13 +1174,17 @@ function getErrorText(error: unknown) {
                 <span class="status-chip" :data-tone="statusTone(selectedReview.status)">{{ selectedReview.status }}</span>
                 <h3>{{ selectedReview.workflowType }}</h3>
               </div>
-              <div class="confidence-meter">
+              <div v-if="report" class="confidence-meter">
                 <span>总体置信度</span>
                 <strong>{{ formatPercent(report?.overallConfidence ?? 0) }}</strong>
               </div>
+              <div v-else class="confidence-meter">
+                <span>结果类型</span>
+                <strong>{{ selectedReview.recommendations.displayName }}</strong>
+              </div>
             </div>
 
-            <p class="summary-text">{{ report?.summary ?? '暂无摘要' }}</p>
+            <p class="summary-text">{{ selectedReview.recommendations.summary || '暂无摘要' }}</p>
 
             <div class="mini-grid">
               <div>
@@ -1182,52 +1198,63 @@ function getErrorText(error: unknown) {
             </div>
           </div>
 
-          <section class="info-block">
-            <div class="block-head">
-              <h3>索引建议</h3>
-              <span>{{ report?.indexRecommendations.length ?? 0 }} 条</span>
-            </div>
-
-            <div v-if="!report?.indexRecommendations.length" class="empty-inline">当前没有索引建议。</div>
-
-            <article
-              v-for="recommendation in report?.indexRecommendations"
-              :key="`${recommendation.tableName}-${recommendation.createDdl}`"
-              class="recommendation-card"
-            >
-              <div class="recommendation-head">
-                <strong>{{ recommendation.tableName }}</strong>
-                <span>{{ formatPercent(recommendation.confidence) }}</span>
+          <template v-if="report">
+            <section class="info-block">
+              <div class="block-head">
+                <h3>索引建议</h3>
+                <span>{{ report?.indexRecommendations.length ?? 0 }} 条</span>
               </div>
-              <p>{{ recommendation.reasoning }}</p>
-              <div class="pill-row">
-                <span class="pill">列：{{ recommendation.columns.join(', ') }}</span>
-                <span class="pill">类型：{{ recommendation.indexType }}</span>
-                <span class="pill">收益：{{ recommendation.estimatedBenefit }}</span>
-              </div>
-              <pre>{{ recommendation.createDdl }}</pre>
-            </article>
-          </section>
 
-          <section class="info-block">
-            <div class="block-head">
-              <h3>证据链</h3>
-              <span>{{ report?.evidenceChain.length ?? 0 }} 条</span>
-            </div>
+              <div v-if="!report?.indexRecommendations.length" class="empty-inline">当前没有索引建议。</div>
 
-            <div v-if="!report?.evidenceChain.length" class="empty-inline">当前没有证据链数据。</div>
-
-            <div v-else class="evidence-list">
-              <article v-for="evidence in report?.evidenceChain" :key="`${evidence.sourceType}-${evidence.reference}`" class="evidence-card">
-                <div class="evidence-top">
-                  <strong>{{ evidence.sourceType }}</strong>
-                  <span>{{ formatPercent(evidence.confidence) }}</span>
+              <article
+                v-for="recommendation in report?.indexRecommendations"
+                :key="`${recommendation.tableName}-${recommendation.createDdl}`"
+                class="recommendation-card"
+              >
+                <div class="recommendation-head">
+                  <strong>{{ recommendation.tableName }}</strong>
+                  <span>{{ formatPercent(recommendation.confidence) }}</span>
                 </div>
-                <p>{{ evidence.description }}</p>
-                <small>{{ evidence.reference }}</small>
-                <pre v-if="evidence.snippet">{{ evidence.snippet }}</pre>
+                <p>{{ recommendation.reasoning }}</p>
+                <div class="pill-row">
+                  <span class="pill">列：{{ recommendation.columns.join(', ') }}</span>
+                  <span class="pill">类型：{{ recommendation.indexType }}</span>
+                  <span class="pill">收益：{{ recommendation.estimatedBenefit }}</span>
+                </div>
+                <pre>{{ recommendation.createDdl }}</pre>
               </article>
+            </section>
+
+            <section class="info-block">
+              <div class="block-head">
+                <h3>证据链</h3>
+                <span>{{ report?.evidenceChain.length ?? 0 }} 条</span>
+              </div>
+
+              <div v-if="!report?.evidenceChain.length" class="empty-inline">当前没有证据链数据。</div>
+
+              <div v-else class="evidence-list">
+                <article v-for="evidence in report?.evidenceChain" :key="`${evidence.sourceType}-${evidence.reference}`" class="evidence-card">
+                  <div class="evidence-top">
+                    <strong>{{ evidence.sourceType }}</strong>
+                    <span>{{ formatPercent(evidence.confidence) }}</span>
+                  </div>
+                  <p>{{ evidence.description }}</p>
+                  <small>{{ evidence.reference }}</small>
+                  <pre v-if="evidence.snippet">{{ evidence.snippet }}</pre>
+                </article>
+              </div>
+            </section>
+          </template>
+
+          <section v-else class="info-block">
+            <div class="block-head">
+              <h3>结果详情</h3>
+              <span>{{ selectedReview.recommendations.displayName }}</span>
             </div>
+
+            <pre>{{ formatJsonBlock(selectedReview.recommendations.data) }}</pre>
           </section>
 
           <section class="info-block">
