@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using DbOptimizer.Core.Models;
 using DbOptimizer.Infrastructure.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
@@ -151,7 +152,7 @@ internal sealed record WorkflowStatusResponse(
     DateTimeOffset StartedAt,
     DateTimeOffset UpdatedAt,
     DateTimeOffset? CompletedAt,
-    OptimizationReport? Result,
+    WorkflowResultEnvelope? Result,
     Guid? ReviewId,
     string? ReviewStatus,
     string? ErrorMessage);
@@ -514,7 +515,9 @@ internal sealed class WorkflowExecutionScheduler(
     }
 }
 
-internal sealed class WorkflowQueryService(ICheckpointStorage checkpointStorage) : IWorkflowQueryService
+internal sealed class WorkflowQueryService(
+    ICheckpointStorage checkpointStorage,
+    IWorkflowResultSerializer workflowResultSerializer) : IWorkflowQueryService
 {
     private const int SqlAnalysisStepCount = 6;
 
@@ -530,10 +533,16 @@ internal sealed class WorkflowQueryService(ICheckpointStorage checkpointStorage)
         checkpoint.Context.TryGetValue(WorkflowContextKeys.ReviewId, out var reviewIdElement);
         checkpoint.Context.TryGetValue(WorkflowContextKeys.ReviewStatus, out var reviewStatusElement);
         checkpoint.Context.TryGetValue("LastError", out var errorElement);
+        checkpoint.Context.TryGetValue(WorkflowContextKeys.DatabaseId, out var databaseIdElement);
+        checkpoint.Context.TryGetValue(WorkflowContextKeys.DatabaseType, out var databaseTypeElement);
 
         var result = finalResultElement.ValueKind == default
             ? null
-            : finalResultElement.Deserialize<OptimizationReport>();
+            : workflowResultSerializer.ToEnvelope(
+                checkpoint.WorkflowType,
+                finalResultElement,
+                databaseIdElement.ValueKind == default ? null : databaseIdElement.Deserialize<string>(),
+                databaseTypeElement.ValueKind == default ? null : databaseTypeElement.Deserialize<string>());
         var reviewId = reviewIdElement.ValueKind == default
             ? null
             : reviewIdElement.Deserialize<Guid?>();

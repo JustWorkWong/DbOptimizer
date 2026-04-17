@@ -30,7 +30,7 @@ export interface ReviewListItem {
   sessionId: string
   workflowType: string
   status: string
-  recommendations: OptimizationReport
+  recommendations: WorkflowResultEnvelope
   createdAt: string
 }
 
@@ -49,7 +49,7 @@ export interface WorkflowStatus {
   startedAt: string
   updatedAt: string
   completedAt: string | null
-  result: OptimizationReport | null
+  result: WorkflowResultEnvelope | null
   reviewId: string | null
   reviewStatus: string | null
   errorMessage: string | null
@@ -113,7 +113,7 @@ export interface HistoryDetail {
       context: Record<string, unknown> | null
     }>
   }>
-  result: OptimizationReport | null
+  result: WorkflowResultEnvelope | null
   tokenUsage: {
     prompt: number
     completion: number
@@ -144,6 +144,14 @@ export interface HistoryListPayload {
 export interface ReplayResponse {
   sessionId: string
   events: WorkflowStreamEvent[]
+}
+
+export interface WorkflowResultEnvelope {
+  resultType: string
+  displayName: string
+  summary: string
+  data: Record<string, unknown>
+  metadata: Record<string, unknown>
 }
 
 export interface OptimizationReport {

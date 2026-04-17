@@ -28,6 +28,7 @@ public interface IConfigReviewTaskService
  * ========================= */
 public sealed class ReviewTaskService(
     IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
+    IWorkflowResultSerializer workflowResultSerializer,
     ILogger<ReviewTaskService> logger) : IReviewTaskService
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
@@ -38,12 +39,16 @@ public sealed class ReviewTaskService(
         CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var (databaseId, databaseType) = await LoadDatabaseMetadataAsync(dbContext, sessionId, cancellationToken);
 
         var entity = new ReviewTaskEntity
         {
+            TaskId = Guid.NewGuid(),
             SessionId = sessionId,
             TaskType = "SqlOptimization",
-            Recommendations = JsonSerializer.Serialize(report, SerializerOptions),
+            Recommendations = JsonSerializer.Serialize(
+                workflowResultSerializer.ToEnvelope(report, databaseId, databaseType),
+                SerializerOptions),
             Status = "Pending",
             CreatedAt = DateTimeOffset.UtcNow
         };
@@ -59,6 +64,45 @@ public sealed class ReviewTaskService(
 
         return entity.TaskId;
     }
+
+    private static async Task<(string DatabaseId, string DatabaseType)> LoadDatabaseMetadataAsync(
+        DbOptimizerDbContext dbContext,
+        Guid sessionId,
+        CancellationToken cancellationToken)
+    {
+        var state = await dbContext.WorkflowSessions
+            .AsNoTracking()
+            .Where(item => item.SessionId == sessionId)
+            .Select(item => item.State)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(state))
+        {
+            return (string.Empty, string.Empty);
+        }
+
+        using var document = JsonDocument.Parse(state);
+        if (!document.RootElement.TryGetProperty("context", out var contextElement) ||
+            contextElement.ValueKind != JsonValueKind.Object)
+        {
+            return (string.Empty, string.Empty);
+        }
+
+        return (
+            ReadContextString(contextElement, WorkflowContextKeys.DatabaseId),
+            ReadContextString(contextElement, WorkflowContextKeys.DatabaseType));
+    }
+
+    private static string ReadContextString(JsonElement contextElement, string propertyName)
+    {
+        if (contextElement.TryGetProperty(propertyName, out var propertyElement) &&
+            propertyElement.ValueKind == JsonValueKind.String)
+        {
+            return propertyElement.GetString() ?? string.Empty;
+        }
+
+        return string.Empty;
+    }
 }
 
 /* =========================
@@ -66,6 +110,7 @@ public sealed class ReviewTaskService(
  * ========================= */
 public sealed class ConfigReviewTaskService(
     IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
+    IWorkflowResultSerializer workflowResultSerializer,
     ILogger<ConfigReviewTaskService> logger) : IConfigReviewTaskService
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
@@ -79,9 +124,12 @@ public sealed class ConfigReviewTaskService(
 
         var entity = new ReviewTaskEntity
         {
+            TaskId = Guid.NewGuid(),
             SessionId = sessionId,
             TaskType = "ConfigOptimization",
-            Recommendations = JsonSerializer.Serialize(report, SerializerOptions),
+            Recommendations = JsonSerializer.Serialize(
+                workflowResultSerializer.ToEnvelope(report),
+                SerializerOptions),
             Status = "Pending",
             CreatedAt = DateTimeOffset.UtcNow
         };
