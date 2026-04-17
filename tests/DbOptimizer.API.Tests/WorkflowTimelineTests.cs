@@ -1,4 +1,4 @@
-using DbOptimizer.API.Workflows;
+using DbOptimizer.Infrastructure.Workflows;
 using Xunit;
 
 namespace DbOptimizer.API.Tests;

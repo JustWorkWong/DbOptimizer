@@ -1,4 +1,4 @@
-using DbOptimizer.API.Workflows;
+using DbOptimizer.Infrastructure.Workflows;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 

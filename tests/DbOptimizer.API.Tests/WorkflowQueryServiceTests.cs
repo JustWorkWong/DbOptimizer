@@ -1,7 +1,7 @@
 using System.Text.Json;
 using DbOptimizer.API.Api;
-using DbOptimizer.API.Checkpointing;
-using DbOptimizer.API.Workflows;
+using DbOptimizer.Infrastructure.Checkpointing;
+using DbOptimizer.Infrastructure.Workflows;
 using Xunit;
 
 namespace DbOptimizer.API.Tests;
