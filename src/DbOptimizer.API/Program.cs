@@ -17,8 +17,14 @@ var postgreSqlConnectionString = ResolvePostgreSqlConnectionString(builder.Confi
 var redisConnectionString = ResolveRedisConnectionString(builder.Configuration);
 var corsOrigins = builder.Configuration.GetSection("DbOptimizer:Cors:AllowedOrigins").Get<string[]>()
     ?? ["http://127.0.0.1:5173", "http://localhost:5173"];
-var executionPlanOptions = builder.Configuration.GetSection(ExecutionPlanOptions.SectionName).Get<ExecutionPlanOptions>()
-    ?? CreateDefaultExecutionPlanOptions();
+var workflowExecutionPlanOptions = builder.Configuration
+    .GetSection(DbOptimizer.Infrastructure.Workflows.ExecutionPlanOptions.SectionName)
+    .Get<DbOptimizer.Infrastructure.Workflows.ExecutionPlanOptions>()
+    ?? CreateDefaultWorkflowExecutionPlanOptions();
+var slowQueryExecutionPlanOptions = builder.Configuration
+    .GetSection(DbOptimizer.Core.Models.ExecutionPlanOptions.SectionName)
+    .Get<DbOptimizer.Core.Models.ExecutionPlanOptions>()
+    ?? CreateDefaultSlowQueryExecutionPlanOptions();
 var workflowRuntimeOptions = builder.Configuration.GetSection(WorkflowRuntimeOptions.SectionName).Get<WorkflowRuntimeOptions>()
     ?? new WorkflowRuntimeOptions();
 var configCollectionOptions = builder.Configuration.GetSection(ConfigCollectionOptions.SectionName).Get<ConfigCollectionOptions>()
@@ -126,8 +132,10 @@ builder.Services.AddSingleton<IWorkflowExecutionScheduler, WorkflowExecutionSche
 builder.Services.AddSingleton<IWorkflowQueryService, WorkflowQueryService>();
 builder.Services.AddSingleton<IReviewApplicationService, ReviewApplicationService>();
 builder.Services.AddSingleton<IHistoryQueryService, HistoryQueryService>();
-builder.Services.AddSingleton<ISqlParser, LightweightSqlParser>();
-builder.Services.AddSingleton(executionPlanOptions);
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.ISqlParser, DbOptimizer.Infrastructure.Workflows.LightweightSqlParser>();
+builder.Services.AddSingleton<DbOptimizer.Core.Models.ISqlParser, DbOptimizer.Core.Models.LightweightSqlParser>();
+builder.Services.AddSingleton(workflowExecutionPlanOptions);
+builder.Services.AddSingleton(slowQueryExecutionPlanOptions);
 builder.Services.AddSingleton(workflowRuntimeOptions);
 builder.Services.AddSingleton(configCollectionOptions);
 builder.Services.AddSingleton(slowQueryCollectionOptions);
@@ -302,18 +310,43 @@ static string ResolveRedisConnectionString(IConfiguration configuration)
     throw new InvalidOperationException("Missing Redis connection string: ConnectionStrings:redis or ConnectionStrings:Redis or DbOptimizer:ConnectionStrings:Redis");
 }
 
-static ExecutionPlanOptions CreateDefaultExecutionPlanOptions()
+static DbOptimizer.Infrastructure.Workflows.ExecutionPlanOptions CreateDefaultWorkflowExecutionPlanOptions()
 {
-    return new ExecutionPlanOptions
+    return new DbOptimizer.Infrastructure.Workflows.ExecutionPlanOptions
     {
-        MySql = new ExecutionPlanMcpServerOptions
+        MySql = new DbOptimizer.Infrastructure.Workflows.ExecutionPlanMcpServerOptions
         {
             Enabled = true,
             Transport = "stdio",
             Command = "npx",
             Arguments = "-y @modelcontextprotocol/server-mysql"
         },
-        PostgreSql = new ExecutionPlanMcpServerOptions
+        PostgreSql = new DbOptimizer.Infrastructure.Workflows.ExecutionPlanMcpServerOptions
+        {
+            Enabled = true,
+            Transport = "stdio",
+            Command = "npx",
+            Arguments = "-y @modelcontextprotocol/server-postgres"
+        },
+        TimeoutSeconds = 30,
+        RetryCount = 2,
+        RetryDelayMilliseconds = 1000,
+        EnableDirectDbFallback = true
+    };
+}
+
+static DbOptimizer.Core.Models.ExecutionPlanOptions CreateDefaultSlowQueryExecutionPlanOptions()
+{
+    return new DbOptimizer.Core.Models.ExecutionPlanOptions
+    {
+        MySql = new DbOptimizer.Core.Models.ExecutionPlanMcpServerOptions
+        {
+            Enabled = true,
+            Transport = "stdio",
+            Command = "npx",
+            Arguments = "-y @modelcontextprotocol/server-mysql"
+        },
+        PostgreSql = new DbOptimizer.Core.Models.ExecutionPlanMcpServerOptions
         {
             Enabled = true,
             Transport = "stdio",
