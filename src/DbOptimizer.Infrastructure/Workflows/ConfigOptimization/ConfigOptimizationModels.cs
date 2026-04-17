@@ -8,7 +8,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
 /// <summary>
 /// 数据库配置快照
 /// </summary>
-internal sealed record DbConfigSnapshot
+public sealed record DbConfigSnapshot
 {
     /// <summary>
     /// 数据库类型（MySQL/PostgreSQL）
@@ -49,7 +49,7 @@ internal sealed record DbConfigSnapshot
 /// <summary>
 /// 单个配置参数
 /// </summary>
-internal sealed record ConfigParameter
+public sealed record ConfigParameter
 {
     /// <summary>
     /// 参数名称
@@ -95,7 +95,7 @@ internal sealed record ConfigParameter
 /// <summary>
 /// 系统指标
 /// </summary>
-internal sealed record SystemMetrics
+public sealed record SystemMetrics
 {
     /// <summary>
     /// CPU 核心数
@@ -146,7 +146,7 @@ internal sealed record SystemMetrics
 /// <summary>
 /// 配置收集选项
 /// </summary>
-internal sealed class ConfigCollectionOptions
+public sealed class ConfigCollectionOptions
 {
     public const string SectionName = "DbOptimizer:ConfigCollection";
 
@@ -164,7 +164,7 @@ internal sealed class ConfigCollectionOptions
 /// <summary>
 /// 配置收集 MCP 服务器选项
 /// </summary>
-internal sealed class ConfigCollectionMcpServerOptions
+public sealed class ConfigCollectionMcpServerOptions
 {
     public bool Enabled { get; set; } = true;
 
@@ -178,7 +178,7 @@ internal sealed class ConfigCollectionMcpServerOptions
 /// <summary>
 /// 配置优化建议
 /// </summary>
-internal sealed record ConfigRecommendation
+public sealed record ConfigRecommendation
 {
     /// <summary>
     /// 参数名称
@@ -229,7 +229,7 @@ internal sealed record ConfigRecommendation
 /// <summary>
 /// 配置优化报告（Coordinator 汇总结果）
 /// </summary>
-internal sealed record ConfigOptimizationReport
+public sealed record ConfigOptimizationReport
 {
     /// <summary>
     /// 汇总摘要（自然语言）

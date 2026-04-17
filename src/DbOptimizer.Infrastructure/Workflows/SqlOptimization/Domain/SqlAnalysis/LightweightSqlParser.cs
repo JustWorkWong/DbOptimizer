@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal interface ISqlParser
+public interface ISqlParser
 {
     ParsedSqlResult Parse(string sqlText, string? dialect = null);
 }
@@ -15,7 +15,7 @@ internal interface ISqlParser
  * 2) 对 CTE、子查询、窗口函数、多语句等复杂特性采用“部分解析 + warning”
  * 3) 输出稳定中间表示，供后续 ExecutionPlan / IndexAdvisor 继续消费
  * ========================= */
-internal sealed class LightweightSqlParser : ISqlParser
+public sealed class LightweightSqlParser : ISqlParser
 {
     private static readonly Regex QualifiedColumnRegex = new(
         @"(?<table>[A-Za-z_][\w$]*)\s*\.\s*(?<column>[A-Za-z_][\w$]*|\*)",

@@ -11,7 +11,7 @@ namespace DbOptimizer.Infrastructure.Persistence;
  * 2) 避免依赖 Aspire 运行时注入连接串
  * 3) 仅用于迁移生成与工具链，不参与业务运行
  * ========================= */
-internal sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<DbOptimizerDbContext>
+public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<DbOptimizerDbContext>
 {
     public DbOptimizerDbContext CreateDbContext(string[] args)
     {

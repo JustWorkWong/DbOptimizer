@@ -4,7 +4,7 @@ namespace DbOptimizer.Infrastructure.DatabaseMigrations;
  * 迁移健康状态
  * 用于 /health 输出当前迁移是否完成
  * ========================= */
-internal sealed class MigrationReadinessState
+public sealed class MigrationReadinessState
 {
     public bool IsReady { get; private set; }
 

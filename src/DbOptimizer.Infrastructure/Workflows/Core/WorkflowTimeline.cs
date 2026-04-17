@@ -4,7 +4,7 @@ using DbOptimizer.Infrastructure.Checkpointing;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal static class WorkflowTimeline
+public static class WorkflowTimeline
 {
     private const int MaxPersistedEventsPerSession = 2048;
 

@@ -5,7 +5,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
  * Coordinator 汇总模型
  * 让后续 HumanReview / API / 前端都能直接消费统一结果。
  * ========================= */
-internal sealed class OptimizationReport
+public sealed class OptimizationReport
 {
     public string Summary { get; set; } = string.Empty;
 
@@ -22,7 +22,7 @@ internal sealed class OptimizationReport
     public Dictionary<string, object> Metadata { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
-internal sealed class SqlRewriteSuggestion
+public sealed class SqlRewriteSuggestion
 {
     public string Description { get; set; } = string.Empty;
 
@@ -31,7 +31,7 @@ internal sealed class SqlRewriteSuggestion
     public double Confidence { get; set; }
 }
 
-internal sealed class EvidenceItem
+public sealed class EvidenceItem
 {
     public string SourceType { get; set; } = string.Empty;
 

@@ -5,7 +5,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
  * Workflow 上下文键名约定
  * 统一常用键名，避免不同 Executor 间出现大小写和命名漂移。
  * ========================= */
-internal static class WorkflowContextKeys
+public static class WorkflowContextKeys
 {
     public const string DatabaseId = "DatabaseId";
     public const string WorkflowTimeline = "WorkflowTimeline";

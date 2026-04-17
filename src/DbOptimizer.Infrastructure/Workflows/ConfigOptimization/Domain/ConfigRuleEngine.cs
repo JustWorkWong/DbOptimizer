@@ -4,7 +4,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
 /* =========================
  * 配置规则引擎接口
  * ========================= */
-internal interface IConfigRuleEngine
+public interface IConfigRuleEngine
 {
     IReadOnlyList<ConfigRecommendation> AnalyzeConfig(DbConfigSnapshot snapshot);
 }
@@ -13,7 +13,7 @@ internal interface IConfigRuleEngine
  * 配置规则接口
  * 每个规则独立判断一个配置参数是否需要优化
  * ========================= */
-internal interface IConfigRule
+public interface IConfigRule
 {
     string RuleName { get; }
     string[] ApplicableParameters { get; }
@@ -26,7 +26,7 @@ internal interface IConfigRule
  * 规则式配置分析引擎
  * 基于预定义规则库分析数据库配置，生成优化建议
  * ========================= */
-internal sealed class ConfigRuleEngine(IEnumerable<IConfigRule> rules) : IConfigRuleEngine
+public sealed class ConfigRuleEngine(IEnumerable<IConfigRule> rules) : IConfigRuleEngine
 {
     private readonly IReadOnlyList<IConfigRule> _rules = rules.ToList();
 
@@ -76,7 +76,7 @@ internal sealed class ConfigRuleEngine(IEnumerable<IConfigRule> rules) : IConfig
  * MySQL InnoDB Buffer Pool 规则
  * 建议设置为物理内存的 70-80%
  * ========================= */
-internal sealed class MySqlBufferPoolRule : IConfigRule
+public sealed class MySqlBufferPoolRule : IConfigRule
 {
     public string RuleName => "MySqlBufferPoolSize";
     public string[] ApplicableParameters => ["innodb_buffer_pool_size"];
@@ -139,7 +139,7 @@ internal sealed class MySqlBufferPoolRule : IConfigRule
  * MySQL Max Connections 规则
  * 根据 CPU 核心数和活跃连接数调整
  * ========================= */
-internal sealed class MySqlMaxConnectionsRule : IConfigRule
+public sealed class MySqlMaxConnectionsRule : IConfigRule
 {
     public string RuleName => "MySqlMaxConnections";
     public string[] ApplicableParameters => ["max_connections"];
@@ -206,7 +206,7 @@ internal sealed class MySqlMaxConnectionsRule : IConfigRule
  * PostgreSQL Shared Buffers 规则
  * 建议设置为物理内存的 25%
  * ========================= */
-internal sealed class PostgreSqlSharedBuffersRule : IConfigRule
+public sealed class PostgreSqlSharedBuffersRule : IConfigRule
 {
     public string RuleName => "PostgreSqlSharedBuffers";
     public string[] ApplicableParameters => ["shared_buffers"];
@@ -305,7 +305,7 @@ internal sealed class PostgreSqlSharedBuffersRule : IConfigRule
  * PostgreSQL Work Mem 规则
  * 根据查询复杂度和并发数调整
  * ========================= */
-internal sealed class PostgreSqlWorkMemRule : IConfigRule
+public sealed class PostgreSqlWorkMemRule : IConfigRule
 {
     public string RuleName => "PostgreSqlWorkMem";
     public string[] ApplicableParameters => ["work_mem"];
@@ -412,7 +412,7 @@ internal sealed class PostgreSqlWorkMemRule : IConfigRule
  * MySQL Query Cache 规则
  * MySQL 8.0+ 已移除 Query Cache，建议禁用或移除
  * ========================= */
-internal sealed class MySqlQueryCacheRule : IConfigRule
+public sealed class MySqlQueryCacheRule : IConfigRule
 {
     public string RuleName => "MySqlQueryCache";
     public string[] ApplicableParameters => ["query_cache_size", "query_cache_type"];

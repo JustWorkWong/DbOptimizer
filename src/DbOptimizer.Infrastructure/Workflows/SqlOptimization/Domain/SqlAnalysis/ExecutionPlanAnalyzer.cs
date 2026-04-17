@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal interface IExecutionPlanAnalyzer
+public interface IExecutionPlanAnalyzer
 {
     ExecutionPlanResult Analyze(
         DatabaseOptimizationEngine databaseEngine,
@@ -18,7 +18,7 @@ internal interface IExecutionPlanAnalyzer
  * - 基础指标：rows / cost / fallback / elapsed
  * 对无法结构化识别的内容保留 rawPlan 与 warning，保证后续可继续演进。
  * ========================= */
-internal sealed class ExecutionPlanAnalyzer : IExecutionPlanAnalyzer
+public sealed class ExecutionPlanAnalyzer : IExecutionPlanAnalyzer
 {
     public ExecutionPlanResult Analyze(
         DatabaseOptimizationEngine databaseEngine,

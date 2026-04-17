@@ -3,14 +3,14 @@ using DbOptimizer.Infrastructure.Checkpointing;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal interface IWorkflowStateMachine
+public interface IWorkflowStateMachine
 {
     bool CanTransition(WorkflowCheckpointStatus currentStatus, WorkflowCheckpointStatus nextStatus);
 
     void EnsureCanTransition(WorkflowCheckpointStatus currentStatus, WorkflowCheckpointStatus nextStatus);
 }
 
-internal sealed class WorkflowStateMachine : IWorkflowStateMachine
+public sealed class WorkflowStateMachine : IWorkflowStateMachine
 {
     private static readonly IReadOnlyDictionary<WorkflowCheckpointStatus, WorkflowCheckpointStatus[]> AllowedTransitions =
         new Dictionary<WorkflowCheckpointStatus, WorkflowCheckpointStatus[]>

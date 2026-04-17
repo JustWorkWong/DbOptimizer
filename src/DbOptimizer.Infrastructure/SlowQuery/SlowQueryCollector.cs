@@ -17,7 +17,7 @@ namespace DbOptimizer.Infrastructure.SlowQuery;
  * 3) PostgreSQL: 查询 pg_stat_statements 视图（按平均执行时间排序）
  * 4) 错误处理：MCP 失败时返回空列表并记录日志
  * ========================= */
-internal sealed class SlowQueryCollector(
+public sealed class SlowQueryCollector(
     IConfiguration configuration,
     ExecutionPlanOptions executionPlanOptions,
     SlowQueryCollectionOptions collectionOptions,

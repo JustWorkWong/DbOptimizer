@@ -12,7 +12,7 @@ using Npgsql;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal interface ITableIndexMetadataProvider
+public interface ITableIndexMetadataProvider
 {
     Task<IndexMetadataInvocationResult> GetIndexesAsync(
         DatabaseOptimizationEngine databaseEngine,
@@ -24,7 +24,7 @@ internal interface ITableIndexMetadataProvider
  * 表索引元数据获取器
  * 规则与 ExecutionPlanProvider 保持一致：先 MCP，再按配置降级直连。
  * ========================= */
-internal sealed class TableIndexMetadataProvider(
+public sealed class TableIndexMetadataProvider(
     IConfiguration configuration,
     ExecutionPlanOptions executionPlanOptions,
     ILogger<TableIndexMetadataProvider> logger) : ITableIndexMetadataProvider

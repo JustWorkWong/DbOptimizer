@@ -9,7 +9,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
  * 2) 控制回流次数，避免无限重生成
  * 3) 生成带有反馈痕迹的新汇总结果，供后续再次进入 HumanReview
  * ========================= */
-internal sealed class RegenerationExecutor(
+public sealed class RegenerationExecutor(
     WorkflowRuntimeOptions workflowRuntimeOptions,
     ILogger<RegenerationExecutor> logger) : IWorkflowExecutor
 {

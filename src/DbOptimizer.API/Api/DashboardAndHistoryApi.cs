@@ -1,7 +1,7 @@
 using System.Text.Json;
-using DbOptimizer.API.Checkpointing;
-using DbOptimizer.API.Persistence;
-using DbOptimizer.API.Workflows;
+using DbOptimizer.Infrastructure.Checkpointing;
+using DbOptimizer.Infrastructure.Persistence;
+using DbOptimizer.Infrastructure.Workflows;
 using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.API.Api;

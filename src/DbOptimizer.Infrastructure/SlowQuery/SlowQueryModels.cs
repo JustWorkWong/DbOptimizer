@@ -13,7 +13,7 @@ namespace DbOptimizer.Infrastructure.SlowQuery;
 /// <summary>
 /// 原始慢查询数据（从 MCP 采集）
 /// </summary>
-internal sealed record RawSlowQuery
+public sealed record RawSlowQuery
 {
     public required string SqlText { get; init; }
     public required TimeSpan ExecutionTime { get; init; }
@@ -27,7 +27,7 @@ internal sealed record RawSlowQuery
 /// <summary>
 /// 规范化慢查询数据（清洗后）
 /// </summary>
-internal sealed record NormalizedSlowQuery
+public sealed record NormalizedSlowQuery
 {
     public required string SqlFingerprint { get; init; }
     public required string QueryHash { get; init; }

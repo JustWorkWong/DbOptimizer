@@ -5,7 +5,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
  * 索引建议模型
  * 输出尽量贴近设计文档，便于后续 Coordinator / Review 直接消费。
  * ========================= */
-internal sealed class IndexRecommendation
+public sealed class IndexRecommendation
 {
     public string TableName { get; set; } = string.Empty;
 
@@ -24,7 +24,7 @@ internal sealed class IndexRecommendation
     public double Confidence { get; set; }
 }
 
-internal sealed class ExistingIndexDefinition
+public sealed class ExistingIndexDefinition
 {
     public string IndexName { get; set; } = string.Empty;
 
@@ -37,7 +37,7 @@ internal sealed class ExistingIndexDefinition
     public string RawDefinition { get; set; } = string.Empty;
 }
 
-internal sealed class TableIndexMetadata
+public sealed class TableIndexMetadata
 {
     public string TableName { get; set; } = string.Empty;
 
@@ -50,7 +50,7 @@ internal sealed class TableIndexMetadata
     public List<string> Warnings { get; set; } = new();
 }
 
-internal sealed class IndexMetadataInvocationResult
+public sealed class IndexMetadataInvocationResult
 {
     public string ToolName { get; set; } = "show_indexes";
 

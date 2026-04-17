@@ -9,7 +9,7 @@ namespace DbOptimizer.Infrastructure.Persistence;
  * 2) 通过 EF Core Migration 管理结构演进
  * 3) 保持与现有 snake_case 表结构一致
  * ========================= */
-internal sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext> options) : DbContext(options)
+public sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext> options) : DbContext(options)
 {
     public DbSet<WorkflowSessionEntity> WorkflowSessions => Set<WorkflowSessionEntity>();
 
@@ -292,7 +292,7 @@ internal sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext
     }
 }
 
-internal sealed class WorkflowSessionEntity
+public sealed class WorkflowSessionEntity
 {
     public Guid SessionId { get; set; }
 
@@ -317,7 +317,7 @@ internal sealed class WorkflowSessionEntity
     public ICollection<ErrorLogEntity> ErrorLogs { get; set; } = new List<ErrorLogEntity>();
 }
 
-internal sealed class AgentExecutionEntity
+public sealed class AgentExecutionEntity
 {
     public Guid ExecutionId { get; set; }
 
@@ -352,7 +352,7 @@ internal sealed class AgentExecutionEntity
     public ICollection<ErrorLogEntity> ErrorLogs { get; set; } = new List<ErrorLogEntity>();
 }
 
-internal sealed class ToolCallEntity
+public sealed class ToolCallEntity
 {
     public Guid CallId { get; set; }
 
@@ -375,7 +375,7 @@ internal sealed class ToolCallEntity
     public AgentExecutionEntity Execution { get; set; } = null!;
 }
 
-internal sealed class AgentMessageEntity
+public sealed class AgentMessageEntity
 {
     public Guid MessageId { get; set; }
 
@@ -392,7 +392,7 @@ internal sealed class AgentMessageEntity
     public AgentExecutionEntity Execution { get; set; } = null!;
 }
 
-internal sealed class DecisionRecordEntity
+public sealed class DecisionRecordEntity
 {
     public Guid DecisionId { get; set; }
 
@@ -411,7 +411,7 @@ internal sealed class DecisionRecordEntity
     public AgentExecutionEntity Execution { get; set; } = null!;
 }
 
-internal sealed class ReviewTaskEntity
+public sealed class ReviewTaskEntity
 {
     public Guid TaskId { get; set; }
 
@@ -434,7 +434,7 @@ internal sealed class ReviewTaskEntity
     public WorkflowSessionEntity Session { get; set; } = null!;
 }
 
-internal sealed class PromptVersionEntity
+public sealed class PromptVersionEntity
 {
     public Guid VersionId { get; set; }
 
@@ -453,7 +453,7 @@ internal sealed class PromptVersionEntity
     public string? CreatedBy { get; set; }
 }
 
-internal sealed class ErrorLogEntity
+public sealed class ErrorLogEntity
 {
     public Guid LogId { get; set; }
 
@@ -476,7 +476,7 @@ internal sealed class ErrorLogEntity
     public AgentExecutionEntity? Execution { get; set; }
 }
 
-internal sealed class SlowQueryEntity
+public sealed class SlowQueryEntity
 {
     public Guid QueryId { get; set; }
     public string DatabaseId { get; set; } = string.Empty;

@@ -8,7 +8,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
  * 2) 尽量给后续 ExecutionPlan / IndexAdvisor 预留扩展位
  * 3) 对复杂 SQL 允许部分解析，靠 Warning/UnsupportedFeatures 表达不确定性
  * ========================= */
-internal sealed class ParsedSqlResult
+public sealed class ParsedSqlResult
 {
     public int SchemaVersion { get; set; } = 1;
 
@@ -49,7 +49,7 @@ internal sealed class ParsedSqlResult
     public List<string> Warnings { get; set; } = new();
 }
 
-internal sealed class ParsedSqlFeatureFlags
+public sealed class ParsedSqlFeatureFlags
 {
     public bool HasCte { get; set; }
 
@@ -68,7 +68,7 @@ internal sealed class ParsedSqlFeatureFlags
     public bool HasMultiStatement { get; set; }
 }
 
-internal sealed class ParsedTableReference
+public sealed class ParsedTableReference
 {
     public string TableName { get; set; } = string.Empty;
 
@@ -83,7 +83,7 @@ internal sealed class ParsedTableReference
     public double Confidence { get; set; } = 1;
 }
 
-internal sealed class ParsedColumnReference
+public sealed class ParsedColumnReference
 {
     public string ColumnName { get; set; } = string.Empty;
 
@@ -98,7 +98,7 @@ internal sealed class ParsedColumnReference
     public double Confidence { get; set; } = 1;
 }
 
-internal sealed class ParsedJoinClause
+public sealed class ParsedJoinClause
 {
     public string JoinType { get; set; } = "INNER";
 
@@ -117,7 +117,7 @@ internal sealed class ParsedJoinClause
     public double Confidence { get; set; } = 1;
 }
 
-internal sealed class ParsedWherePredicate
+public sealed class ParsedWherePredicate
 {
     public string Expression { get; set; } = string.Empty;
 
@@ -136,7 +136,7 @@ internal sealed class ParsedWherePredicate
     public double Confidence { get; set; } = 1;
 }
 
-internal class ParsedExpressionReference
+public class ParsedExpressionReference
 {
     public string Expression { get; set; } = string.Empty;
 
@@ -147,12 +147,12 @@ internal class ParsedExpressionReference
     public double Confidence { get; set; } = 1;
 }
 
-internal sealed class ParsedSortExpression : ParsedExpressionReference
+public sealed class ParsedSortExpression : ParsedExpressionReference
 {
     public string Direction { get; set; } = "ASC";
 }
 
-internal sealed class SqlParserInput
+public sealed class SqlParserInput
 {
     public string SqlText { get; set; } = string.Empty;
 

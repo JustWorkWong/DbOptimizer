@@ -10,7 +10,7 @@ namespace DbOptimizer.Infrastructure.SlowQuery;
  * 2) MySQL: 查询 mysql.slow_log 表
  * 3) PostgreSQL: 查询 pg_stat_statements 视图
  * ========================= */
-internal interface ISlowQueryCollector
+public interface ISlowQueryCollector
 {
     Task<IReadOnlyList<RawSlowQuery>> CollectAsync(
         string databaseId,

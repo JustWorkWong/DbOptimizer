@@ -4,12 +4,12 @@ using System.Text.RegularExpressions;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal interface ITableIndexMetadataAnalyzer
+public interface ITableIndexMetadataAnalyzer
 {
     TableIndexMetadata Analyze(string tableName, IndexMetadataInvocationResult invocationResult);
 }
 
-internal sealed class TableIndexMetadataAnalyzer : ITableIndexMetadataAnalyzer
+public sealed class TableIndexMetadataAnalyzer : ITableIndexMetadataAnalyzer
 {
     public TableIndexMetadata Analyze(string tableName, IndexMetadataInvocationResult invocationResult)
     {

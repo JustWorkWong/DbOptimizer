@@ -15,7 +15,7 @@ namespace DbOptimizer.Infrastructure.Checkpointing;
  * 2) Redis 保存热点副本，减少恢复与轮询场景的重复读库
  * 3) Redis 不可用时优先保证 PostgreSQL 落库成功
  * ========================= */
-internal sealed class PostgresRedisCheckpointStorage(
+public sealed class PostgresRedisCheckpointStorage(
     IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
     IConnectionMultiplexer connectionMultiplexer,
     ILogger<PostgresRedisCheckpointStorage> logger) : ICheckpointStorage

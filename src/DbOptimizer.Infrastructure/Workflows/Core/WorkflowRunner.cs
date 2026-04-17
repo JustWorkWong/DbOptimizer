@@ -4,7 +4,7 @@ using DbOptimizer.Infrastructure.Checkpointing;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal interface IWorkflowRunner
+public interface IWorkflowRunner
 {
     Task<WorkflowRunResult> RunAsync(
         WorkflowContext context,
@@ -24,7 +24,7 @@ internal interface IWorkflowRunner
  * 2) 在每个关键节点发布事件并保存 Checkpoint
  * 3) 支持基于已有 Checkpoint 恢复未完成的 Workflow
  * ========================= */
-internal sealed class WorkflowRunner(
+public sealed class WorkflowRunner(
     ICheckpointStorage checkpointStorage,
     IWorkflowEventPublisher workflowEventPublisher,
     IWorkflowStateMachine workflowStateMachine,

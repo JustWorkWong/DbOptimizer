@@ -14,7 +14,7 @@ namespace DbOptimizer.Infrastructure.SlowQuery;
  * 3) 调用 SlowQueryCollector + SlowQueryNormalizer
  * 4) 保存到 slow_queries 表（通过 Repository）
  * ========================= */
-internal sealed class SlowQueryCollectionService(
+public sealed class SlowQueryCollectionService(
     ISlowQueryCollector collector,
     ISlowQueryNormalizer normalizer,
     ISlowQueryRepository repository,
@@ -122,7 +122,7 @@ internal sealed class SlowQueryCollectionService(
 /* =========================
  * 慢查询采集配置
  * ========================= */
-internal sealed class SlowQueryCollectionOptions
+public sealed class SlowQueryCollectionOptions
 {
     public const string SectionName = "SlowQueryCollection";
 
@@ -133,7 +133,7 @@ internal sealed class SlowQueryCollectionOptions
     public IReadOnlyList<DatabaseConfig> EnabledDatabases { get; init; } = Array.Empty<DatabaseConfig>();
 }
 
-internal sealed class DatabaseConfig
+public sealed class DatabaseConfig
 {
     public required string DatabaseId { get; init; }
     public required string DatabaseType { get; init; }

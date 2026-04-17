@@ -11,7 +11,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
  * 2) 与 Checkpoint 模型直接对齐，便于保存和恢复
  * 3) 通过 JsonElement 保持上下文可序列化，避免把运行时对象直接写入快照
  * ========================= */
-internal sealed class WorkflowContext
+public sealed class WorkflowContext
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 

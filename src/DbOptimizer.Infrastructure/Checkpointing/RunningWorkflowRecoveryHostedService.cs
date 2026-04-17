@@ -12,7 +12,7 @@ namespace DbOptimizer.Infrastructure.Checkpointing;
  * 2) 将其 Checkpoint 重新放回 Redis 热缓存，供后续恢复逻辑直接读取
  * 3) 单个会话恢复失败不阻断整体启动
  * ========================= */
-internal sealed class RunningWorkflowRecoveryHostedService(
+public sealed class RunningWorkflowRecoveryHostedService(
     IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
     ICheckpointStorage checkpointStorage,
     ILogger<RunningWorkflowRecoveryHostedService> logger) : IHostedService

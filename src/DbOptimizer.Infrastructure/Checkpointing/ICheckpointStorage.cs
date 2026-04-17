@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace DbOptimizer.Infrastructure.Checkpointing;
 
-internal interface ICheckpointStorage
+public interface ICheckpointStorage
 {
     Task SaveCheckpointAsync(WorkflowCheckpoint checkpoint, CancellationToken cancellationToken = default);
 
@@ -11,7 +11,7 @@ internal interface ICheckpointStorage
     Task DeleteCheckpointAsync(Guid sessionId, CancellationToken cancellationToken = default);
 }
 
-internal sealed record WorkflowCheckpoint
+public sealed record WorkflowCheckpoint
 {
     public Guid SessionId { get; init; }
 
@@ -34,7 +34,7 @@ internal sealed record WorkflowCheckpoint
     public DateTimeOffset? LastCheckpointAt { get; init; }
 }
 
-internal enum WorkflowCheckpointStatus
+public enum WorkflowCheckpointStatus
 {
     Running,
     WaitingForReview,

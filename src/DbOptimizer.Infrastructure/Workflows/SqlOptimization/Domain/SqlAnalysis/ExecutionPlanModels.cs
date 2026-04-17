@@ -5,7 +5,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
  * ExecutionPlan 结果模型
  * 既保留原始执行计划，又抽取最小可消费的性能问题和指标。
  * ========================= */
-internal sealed class ExecutionPlanResult
+public sealed class ExecutionPlanResult
 {
     public string DatabaseEngine { get; set; } = "Unknown";
 
@@ -30,7 +30,7 @@ internal sealed class ExecutionPlanResult
     public List<string> Warnings { get; set; } = new();
 }
 
-internal sealed class ExecutionPlanIssue
+public sealed class ExecutionPlanIssue
 {
     public string Type { get; set; } = string.Empty;
 
@@ -43,14 +43,14 @@ internal sealed class ExecutionPlanIssue
     public string Evidence { get; set; } = string.Empty;
 }
 
-internal enum DatabaseOptimizationEngine
+public enum DatabaseOptimizationEngine
 {
     Unknown,
     MySql,
     PostgreSql
 }
 
-internal sealed class ExecutionPlanOptions
+public sealed class ExecutionPlanOptions
 {
     public const string SectionName = "DbOptimizer:ExecutionPlan";
 
@@ -67,7 +67,7 @@ internal sealed class ExecutionPlanOptions
     public bool EnableDirectDbFallback { get; set; } = true;
 }
 
-internal sealed class ExecutionPlanMcpServerOptions
+public sealed class ExecutionPlanMcpServerOptions
 {
     public bool Enabled { get; set; } = true;
 
@@ -78,7 +78,7 @@ internal sealed class ExecutionPlanMcpServerOptions
     public string Arguments { get; set; } = string.Empty;
 }
 
-internal sealed class ExecutionPlanInvocationResult
+public sealed class ExecutionPlanInvocationResult
 {
     public string ToolName { get; set; } = "explain";
 
