@@ -50,3 +50,4 @@ src/DbOptimizer.AppHost/appsettings.Local.json
 .claude/tmp/
 .claude/worktrees/
 *.stackdump
+.chrome-devtools-profile/
