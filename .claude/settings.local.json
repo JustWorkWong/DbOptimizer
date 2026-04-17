@@ -8,7 +8,12 @@
       "Bash(git *)",
       "Bash(wc -l /e/wfcodes/DbOptimizer/src/DbOptimizer.API/Workflows/*.cs.)",
       "Bash(dotnet run *)",
-      "Bash(dotnet build *)"
+      "Bash(dotnet build *)",
+      "Read(//c/Users/Tengfengsu/.claude/**)",
+      "Bash(npm list *)",
+      "Bash(npx playwright *)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :5001)"
     ]
   }
 }

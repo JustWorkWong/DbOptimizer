@@ -12,7 +12,7 @@ test.describe('DbOptimizer E2E 测试', () => {
   });
 
   test('验证 API 健康检查', async ({ request }) => {
-    const response = await request.get('http://localhost:8669/health');
+    const response = await request.get('http://localhost:15069/health');
     expect(response.ok()).toBeTruthy();
 
     const text = await response.text();
@@ -21,7 +21,7 @@ test.describe('DbOptimizer E2E 测试', () => {
   });
 
   test('验证 Swagger 文档可访问', async ({ page }) => {
-    await page.goto('http://localhost:8669/swagger');
+    await page.goto('http://localhost:15069/swagger');
     await page.waitForLoadState('networkidle');
 
     // 验证 Swagger UI 加载
