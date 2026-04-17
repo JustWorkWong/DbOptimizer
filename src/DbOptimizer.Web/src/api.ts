@@ -399,6 +399,70 @@ export function getSlowQueries(params?: {
   }>(`/api/slow-queries${suffix}`)
 }
 
+export interface PromptVersionDto {
+  versionId: string
+  agentName: string
+  versionNumber: number
+  promptTemplate: string
+  variables: string | null
+  isActive: boolean
+  createdAt: string
+  createdBy: string | null
+}
+
+export interface PromptVersionListResponse {
+  items: PromptVersionDto[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+export interface CreatePromptVersionRequest {
+  agentName: string
+  promptTemplate: string
+  variables?: string | null
+  createdBy?: string | null
+}
+
+export interface RollbackPromptVersionRequest {
+  agentName: string
+  versionNumber: number
+}
+
 export function getSlowQueryDetail(queryId: string) {
   return fetchEnvelope<SlowQueryDetail>(`/api/slow-queries/${queryId}`)
+}
+
+export function listPromptVersions(agentName?: string, page = 1, pageSize = 20) {
+  const params = new URLSearchParams()
+  if (agentName) params.set('agentName', agentName)
+  params.set('page', page.toString())
+  params.set('pageSize', pageSize.toString())
+  return fetchEnvelope<PromptVersionListResponse>(`/api/prompt-versions?${params}`)
+}
+
+export function createPromptVersion(request: CreatePromptVersionRequest) {
+  return fetchEnvelope<PromptVersionDto>('/api/prompt-versions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request)
+  })
+}
+
+export function activatePromptVersion(versionId: string) {
+  return fetchEnvelope<{ versionId: string; message: string }>(
+    `/api/prompt-versions/${versionId}/activate`,
+    { method: 'POST' }
+  )
+}
+
+export function rollbackPromptVersion(request: RollbackPromptVersionRequest) {
+  return fetchEnvelope<{ agentName: string; versionNumber: number; message: string }>(
+    '/api/prompt-versions/rollback',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    }
+  )
 }
