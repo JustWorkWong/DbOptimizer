@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   createSqlAnalysis,
+  createDbConfigOptimization,
   createWorkflowEventSource,
   getDashboardStats,
   getHistoryDetail,
@@ -15,6 +16,7 @@ import {
   type HistoryDetail,
   type HistoryListItem,
   type CreateSqlAnalysisPayload,
+  type CreateDbConfigOptimizationPayload,
   type OptimizationReport,
   type ReviewDetail,
   type ReviewListItem,
@@ -27,7 +29,7 @@ import {
 const stats = ref<DashboardStats | null>(null)
 const reviews = ref<ReviewListItem[]>([])
 const selectedTaskId = ref('')
-const activeView = ref<'sql' | 'review' | 'history' | 'replay'>('sql')
+const activeView = ref<'sql' | 'db-config' | 'review' | 'history' | 'replay'>('sql')
 const selectedReview = ref<ReviewDetail | null>(null)
 const workflow = ref<WorkflowStatus | null>(null)
 const historyDetail = ref<HistoryDetail | null>(null)
@@ -45,7 +47,12 @@ const sqlText = ref('SELECT * FROM users WHERE age > 18 ORDER BY created_at DESC
 const sqlDatabaseId = ref('mysql-local')
 const sqlDatabaseEngine = ref<'mysql' | 'postgresql'>('mysql')
 const sqlSessionId = ref('')
+const dbConfigDatabaseId = ref('mysql-local')
+const dbConfigDatabaseType = ref<'mysql' | 'postgresql'>('mysql')
+const dbConfigSessionId = ref('')
+const dbConfigWorkflowStatus = ref<WorkflowStatus | null>(null)
 const creatingSqlAnalysis = ref(false)
+const creatingDbConfig = ref(false)
 const feedback = ref('')
 const errorMessage = ref('')
 const successMessage = ref('')
@@ -304,6 +311,78 @@ async function startSqlAnalysis() {
     errorMessage.value = getErrorText(error)
   } finally {
     creatingSqlAnalysis.value = false
+  }
+}
+
+async function startDbConfigOptimization() {
+  if (!dbConfigDatabaseId.value.trim()) {
+    errorMessage.value = '请先输入数据库 ID。'
+    return
+  }
+
+  creatingDbConfig.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+  stopReplay()
+
+  try {
+    const payload: CreateDbConfigOptimizationPayload = {
+      databaseId: dbConfigDatabaseId.value.trim(),
+      databaseType: dbConfigDatabaseType.value,
+      options: {
+        allowFallbackSnapshot: true,
+        requireHumanReview: true,
+      },
+    }
+
+    const response = await createDbConfigOptimization(payload)
+    dbConfigSessionId.value = response.sessionId
+    activeView.value = 'db-config'
+    await loadDbConfigWorkflow(response.sessionId)
+    successMessage.value = `数据库配置优化已启动：${response.sessionId}`
+  } catch (error) {
+    errorMessage.value = getErrorText(error)
+  } finally {
+    creatingDbConfig.value = false
+  }
+}
+
+async function loadDbConfigWorkflow(sessionId: string) {
+  const loadId = ++currentLoadId.value
+  loadingDetail.value = true
+  resetReviewForm()
+  closeEventSource()
+  selectedReview.value = null
+  workspaceTaskId.value = ''
+  workflow.value = null
+  historyDetail.value = null
+  replayEvents.value = []
+  activeSessionId.value = sessionId
+  dbConfigSessionId.value = sessionId
+
+  try {
+    const latestWorkflow = await getWorkflow(sessionId)
+    if (loadId !== currentLoadId.value) return
+    dbConfigWorkflowStatus.value = latestWorkflow
+    workflow.value = latestWorkflow
+
+    const [history, replay] = await Promise.allSettled([
+      getHistoryDetail(sessionId),
+      getHistoryReplay(sessionId),
+    ])
+    if (loadId !== currentLoadId.value) return
+
+    historyDetail.value = history.status === 'fulfilled' ? history.value : null
+    replayEvents.value = replay.status === 'fulfilled' ? replay.value.events : []
+    connectToWorkflowEvents(sessionId, loadId)
+  } catch (error) {
+    if (loadId === currentLoadId.value) {
+      errorMessage.value = getErrorText(error)
+    }
+  } finally {
+    if (loadId === currentLoadId.value) {
+      loadingDetail.value = false
+    }
   }
 }
 
@@ -938,6 +1017,9 @@ function getErrorText(error: unknown) {
       <button type="button" class="view-tab" :class="{ active: activeView === 'sql' }" @click="activeView = 'sql'">
         SQL 调优
       </button>
+      <button type="button" class="view-tab" :class="{ active: activeView === 'db-config' }" @click="activeView = 'db-config'">
+        配置调优
+      </button>
       <button type="button" class="view-tab" :class="{ active: activeView === 'review' }" @click="activeView = 'review'">
         审核工作台
       </button>
@@ -1060,6 +1142,148 @@ function getErrorText(error: unknown) {
 
         <div v-if="!workflow && !sqlSessionId" class="empty-state">
           启动一次 SQL 分析后，这里会实时显示 workflow 状态和关键事件。
+        </div>
+
+        <section v-if="workflow && latestExecutorEvent" class="info-block compact">
+          <div class="block-head">
+            <h3>当前执行内容</h3>
+            <span>{{ formatExecutorLabel(workflow?.currentExecutor ?? currentExecution?.executorName ?? null) }}</span>
+          </div>
+
+          <p class="summary-text">{{ formatEventDescription(latestExecutorEvent) }}</p>
+
+          <div v-if="liveExecutorTokenUsage" class="mini-grid">
+            <div>
+              <span class="mini-label">Prompt Tokens</span>
+              <strong>{{ liveExecutorTokenUsage.prompt }}</strong>
+            </div>
+            <div>
+              <span class="mini-label">Completion Tokens</span>
+              <strong>{{ liveExecutorTokenUsage.completion }}</strong>
+            </div>
+            <div>
+              <span class="mini-label">Total / Cost</span>
+              <strong>{{ liveExecutorTokenUsage.total }} / {{ formatTokenCost(liveExecutorTokenUsage.cost) }}</strong>
+            </div>
+          </div>
+
+          <pre v-if="liveExecutorDetails">{{ formatJsonBlock(liveExecutorDetails) }}</pre>
+
+          <div v-if="currentExecution?.toolCalls.length" class="executor-list">
+            <article
+              v-for="toolCall in currentExecution.toolCalls"
+              :key="toolCall.callId"
+              class="executor-card"
+            >
+              <div class="timeline-top">
+                <strong>{{ formatToolName(toolCall.toolName) }}</strong>
+                <span>{{ toolCall.duration }}s</span>
+              </div>
+              <p>{{ formatDateTime(toolCall.startedAt) }}</p>
+              <pre v-if="toolCall.result">{{ formatJsonBlock(toolCall.result) }}</pre>
+            </article>
+          </div>
+        </section>
+
+        <div v-if="workflow" class="timeline-list">
+          <article
+            v-for="event in progressEvents.slice().reverse()"
+            :key="`${event.sequence ?? event.timestamp}-${event.eventType}`"
+            class="timeline-item"
+          >
+            <div class="timeline-top">
+              <strong>{{ formatEventTitle(event) }}</strong>
+              <span>#{{ event.sequence ?? '—' }}</span>
+            </div>
+            <p>{{ formatEventDescription(event) }}</p>
+            <small>{{ formatDateTime(event.timestamp) }}</small>
+          </article>
+        </div>
+      </aside>
+    </section>
+
+    <section v-else-if="activeView === 'db-config'" class="workspace-grid sql-grid">
+      <main class="panel review-detail">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">DB Config Optimization</p>
+            <h2>数据库配置调优</h2>
+          </div>
+        </div>
+
+        <div class="filter-stack">
+          <label class="field-label">
+            数据库标识
+            <input v-model="dbConfigDatabaseId" type="text" placeholder="例如：mysql-local" />
+          </label>
+          <label class="field-label">
+            数据库类型
+            <select v-model="dbConfigDatabaseType">
+              <option value="mysql">MySQL</option>
+              <option value="postgresql">PostgreSQL</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="action-row">
+          <button class="primary-button" type="button" :disabled="creatingDbConfig" @click="startDbConfigOptimization">
+            {{ creatingDbConfig ? '启动中…' : '开始优化' }}
+          </button>
+          <button
+            class="ghost-button"
+            type="button"
+            :disabled="!canOpenCurrentReview"
+            @click="jumpToCurrentReview"
+          >
+            前往审核
+          </button>
+        </div>
+
+        <div class="message-stack">
+          <p v-if="errorMessage" class="message error">{{ errorMessage }}</p>
+          <p v-if="successMessage" class="message success">{{ successMessage }}</p>
+        </div>
+
+        <section v-if="dbConfigWorkflowStatus" class="info-block">
+          <div class="block-head">
+            <h3>优化结果</h3>
+            <span class="status-chip" :data-tone="statusTone(dbConfigWorkflowStatus.status)">{{ formatStatusLabel(dbConfigWorkflowStatus.status) }}</span>
+          </div>
+
+          <div class="mini-grid">
+            <div>
+              <span class="mini-label">Session</span>
+              <code>{{ dbConfigWorkflowStatus.sessionId }}</code>
+            </div>
+            <div>
+              <span class="mini-label">当前执行器</span>
+              <strong>{{ formatExecutorLabel(dbConfigWorkflowStatus.currentExecutor) }}</strong>
+            </div>
+            <div>
+              <span class="mini-label">进度</span>
+              <strong>{{ dbConfigWorkflowStatus.progress }}%</strong>
+            </div>
+          </div>
+
+          <p class="summary-text">{{ workflowProgressSummary }}</p>
+
+          <pre v-if="resultEnvelope">{{ formatJsonBlock(resultEnvelope.data) }}</pre>
+        </section>
+      </main>
+
+      <aside class="panel live-panel">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Progress</p>
+            <h2>执行进度</h2>
+          </div>
+          <span class="status-chip" :data-tone="sseState === 'live' ? 'success' : sseState === 'error' ? 'danger' : 'info'">
+            {{ sseState }}
+          </span>
+        </div>
+
+        <div v-if="!workflow && !dbConfigSessionId" class="empty-state">
+          启动一次配置优化后，这里会实时显示 workflow 状态和关键事件。
         </div>
 
         <section v-if="workflow && latestExecutorEvent" class="info-block compact">

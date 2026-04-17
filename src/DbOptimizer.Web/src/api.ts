@@ -214,6 +214,23 @@ export interface CreateSqlAnalysisPayload {
   }
 }
 
+export interface CreateDbConfigOptimizationPayload {
+  databaseId: string
+  databaseType: string
+  options: {
+    allowFallbackSnapshot: boolean
+    requireHumanReview: boolean
+  }
+}
+
+export interface DbConfigOptimizationStartResponse {
+  sessionId: string
+  workflowType: string
+  engineType: string
+  status: string
+  startedAt: string
+}
+
 const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? ''
 
 async function fetchEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
@@ -267,6 +284,13 @@ export function getWorkflow(sessionId: string) {
 
 export function createSqlAnalysis(payload: CreateSqlAnalysisPayload) {
   return fetchEnvelope<SqlAnalysisStartResponse>('/api/workflows/sql-analysis', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function createDbConfigOptimization(payload: CreateDbConfigOptimizationPayload) {
+  return fetchEnvelope<DbConfigOptimizationStartResponse>('/api/workflows/db-config-optimization', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
