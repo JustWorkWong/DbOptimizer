@@ -4,6 +4,7 @@ using DbOptimizer.Core.Models;
 using DbOptimizer.Infrastructure.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
+using DbOptimizer.Infrastructure.Workflows.Application;
 using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.API.Api;
@@ -25,14 +26,18 @@ internal static class WorkflowApiRouteBuilderExtensions
 
     private static async Task<IResult> HandleCreateSqlAnalysisAsync(
         CreateSqlAnalysisWorkflowRequest request,
-        IWorkflowExecutionScheduler scheduler,
+        IWorkflowApplicationService workflowApplicationService,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         try
         {
-            var response = await scheduler.ScheduleSqlAnalysisAsync(request, cancellationToken);
+            var response = await workflowApplicationService.StartSqlAnalysisAsync(request, cancellationToken);
             return ApiEnvelopeFactory.Success(httpContext, response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ApiEnvelopeFactory.Failure(httpContext, StatusCodes.Status400BadRequest, "VALIDATION_ERROR", ex.Message, null);
         }
         catch (ApiException ex)
         {
@@ -42,14 +47,18 @@ internal static class WorkflowApiRouteBuilderExtensions
 
     private static async Task<IResult> HandleCreateDbConfigOptimizationAsync(
         CreateDbConfigOptimizationWorkflowRequest request,
-        IWorkflowExecutionScheduler scheduler,
+        IWorkflowApplicationService workflowApplicationService,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         try
         {
-            var response = await scheduler.ScheduleDbConfigOptimizationAsync(request, cancellationToken);
+            var response = await workflowApplicationService.StartDbConfigOptimizationAsync(request, cancellationToken);
             return ApiEnvelopeFactory.Success(httpContext, response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ApiEnvelopeFactory.Failure(httpContext, StatusCodes.Status400BadRequest, "VALIDATION_ERROR", ex.Message, null);
         }
         catch (ApiException ex)
         {
@@ -59,11 +68,11 @@ internal static class WorkflowApiRouteBuilderExtensions
 
     private static async Task<IResult> HandleGetWorkflowAsync(
         Guid sessionId,
-        IWorkflowQueryService workflowQueryService,
+        IWorkflowApplicationService workflowApplicationService,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        var response = await workflowQueryService.GetAsync(sessionId, cancellationToken);
+        var response = await workflowApplicationService.GetAsync(sessionId, cancellationToken);
         if (response is null)
         {
             return ApiEnvelopeFactory.Failure(
@@ -79,14 +88,18 @@ internal static class WorkflowApiRouteBuilderExtensions
 
     private static async Task<IResult> HandleCancelWorkflowAsync(
         Guid sessionId,
-        IWorkflowExecutionScheduler scheduler,
+        IWorkflowApplicationService workflowApplicationService,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         try
         {
-            var response = await scheduler.CancelAsync(sessionId, cancellationToken);
+            var response = await workflowApplicationService.CancelAsync(sessionId, cancellationToken);
             return ApiEnvelopeFactory.Success(httpContext, response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ApiEnvelopeFactory.Failure(httpContext, StatusCodes.Status400BadRequest, "INVALID_OPERATION", ex.Message, null);
         }
         catch (ApiException ex)
         {
@@ -96,14 +109,18 @@ internal static class WorkflowApiRouteBuilderExtensions
 
     private static async Task<IResult> HandleResumeWorkflowAsync(
         Guid sessionId,
-        IWorkflowExecutionScheduler scheduler,
+        IWorkflowApplicationService workflowApplicationService,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         try
         {
-            var response = await scheduler.ResumeAsync(sessionId, cancellationToken);
+            var response = await workflowApplicationService.ResumeAsync(sessionId, cancellationToken);
             return ApiEnvelopeFactory.Success(httpContext, response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ApiEnvelopeFactory.Failure(httpContext, StatusCodes.Status400BadRequest, "INVALID_OPERATION", ex.Message, null);
         }
         catch (ApiException ex)
         {
@@ -112,71 +129,26 @@ internal static class WorkflowApiRouteBuilderExtensions
     }
 }
 
-internal sealed class CreateSqlAnalysisWorkflowRequest
-{
-    public string SqlText { get; set; } = string.Empty;
-
-    public string DatabaseId { get; set; } = string.Empty;
-
-    public string? DatabaseEngine { get; set; }
-
-    public SqlAnalysisWorkflowOptions Options { get; set; } = new();
-}
-
-internal sealed class CreateDbConfigOptimizationWorkflowRequest
-{
-    public string DatabaseId { get; set; } = string.Empty;
-
-    public string DatabaseType { get; set; } = string.Empty;
-}
-
-internal sealed class SqlAnalysisWorkflowOptions
-{
-    public bool EnableIndexRecommendation { get; set; } = true;
-
-    public bool EnableSqlRewrite { get; set; } = true;
-}
-
-internal sealed record WorkflowStartResponse(Guid SessionId, string Status, DateTimeOffset StartedAt);
-
-internal sealed record WorkflowCancelResponse(Guid SessionId, string Status);
-
-internal sealed record WorkflowResumeResponse(Guid SessionId, string Status, string ResumedFrom);
-
-internal sealed record WorkflowStatusResponse(
-    Guid SessionId,
-    string WorkflowType,
-    string Status,
-    string? CurrentExecutor,
-    int Progress,
-    DateTimeOffset StartedAt,
-    DateTimeOffset UpdatedAt,
-    DateTimeOffset? CompletedAt,
-    WorkflowResultEnvelope? Result,
-    Guid? ReviewId,
-    string? ReviewStatus,
-    string? ErrorMessage);
-
 internal interface IWorkflowExecutionScheduler
 {
-    Task<WorkflowStartResponse> ScheduleSqlAnalysisAsync(
+    Task<LegacyWorkflowStartResponse> ScheduleSqlAnalysisAsync(
         CreateSqlAnalysisWorkflowRequest request,
         CancellationToken cancellationToken = default);
 
-    Task<WorkflowStartResponse> ScheduleDbConfigOptimizationAsync(
+    Task<LegacyWorkflowStartResponse> ScheduleDbConfigOptimizationAsync(
         CreateDbConfigOptimizationWorkflowRequest request,
         CancellationToken cancellationToken = default);
 
-    Task<WorkflowCancelResponse> CancelAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    Task<LegacyWorkflowCancelResponse> CancelAsync(Guid sessionId, CancellationToken cancellationToken = default);
 
-    Task<WorkflowResumeResponse> ResumeAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    Task<LegacyWorkflowResumeResponse> ResumeAsync(Guid sessionId, CancellationToken cancellationToken = default);
 
-    Task<WorkflowResumeResponse> ResumeAsync(WorkflowCheckpoint checkpoint, CancellationToken cancellationToken = default);
+    Task<LegacyWorkflowResumeResponse> ResumeAsync(WorkflowCheckpoint checkpoint, CancellationToken cancellationToken = default);
 }
 
 internal interface IWorkflowQueryService
 {
-    Task<WorkflowStatusResponse?> GetAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    Task<LegacyWorkflowStatusResponse?> GetAsync(Guid sessionId, CancellationToken cancellationToken = default);
 }
 
 internal sealed class WorkflowExecutionScheduler(
@@ -208,7 +180,7 @@ internal sealed class WorkflowExecutionScheduler(
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _runningSessions = new();
     private readonly IReadOnlyList<IWorkflowExecutor> _workflowExecutors = workflowExecutors.ToArray();
 
-    public async Task<WorkflowStartResponse> ScheduleSqlAnalysisAsync(
+    public async Task<LegacyWorkflowStartResponse> ScheduleSqlAnalysisAsync(
         CreateSqlAnalysisWorkflowRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -238,10 +210,10 @@ internal sealed class WorkflowExecutionScheduler(
             cancellationToken: CancellationToken.None,
             executeAsync: token => workflowRunner.RunAsync(context, _workflowExecutors, token));
 
-        return new WorkflowStartResponse(sessionId, WorkflowCheckpointStatus.Running.ToString(), context.CreatedAt);
+        return new LegacyWorkflowStartResponse(sessionId, WorkflowCheckpointStatus.Running.ToString(), context.CreatedAt);
     }
 
-    public async Task<WorkflowStartResponse> ScheduleDbConfigOptimizationAsync(
+    public async Task<LegacyWorkflowStartResponse> ScheduleDbConfigOptimizationAsync(
         CreateDbConfigOptimizationWorkflowRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -267,10 +239,10 @@ internal sealed class WorkflowExecutionScheduler(
             cancellationToken: CancellationToken.None,
             executeAsync: token => workflowRunner.RunAsync(context, _workflowExecutors, token));
 
-        return new WorkflowStartResponse(sessionId, WorkflowCheckpointStatus.Running.ToString(), context.CreatedAt);
+        return new LegacyWorkflowStartResponse(sessionId, WorkflowCheckpointStatus.Running.ToString(), context.CreatedAt);
     }
 
-    public async Task<WorkflowCancelResponse> CancelAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    public async Task<LegacyWorkflowCancelResponse> CancelAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
         var checkpoint = await checkpointStorage.LoadCheckpointAsync(sessionId, cancellationToken);
         if (checkpoint is null)
@@ -313,7 +285,7 @@ internal sealed class WorkflowExecutionScheduler(
             cancellationSource.Cancel();
         }
 
-        return new WorkflowCancelResponse(sessionId, WorkflowCheckpointStatus.Cancelled.ToString());
+        return new LegacyWorkflowCancelResponse(sessionId, WorkflowCheckpointStatus.Cancelled.ToString());
     }
 
     private async Task PersistCancellationAsync(WorkflowCheckpoint checkpoint, CancellationToken cancellationToken)
@@ -354,7 +326,7 @@ internal sealed class WorkflowExecutionScheduler(
         await transaction.CommitAsync(cancellationToken);
     }
 
-    public async Task<WorkflowResumeResponse> ResumeAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    public async Task<LegacyWorkflowResumeResponse> ResumeAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
         var checkpoint = await checkpointStorage.LoadCheckpointAsync(sessionId, cancellationToken);
         if (checkpoint is null)
@@ -369,7 +341,7 @@ internal sealed class WorkflowExecutionScheduler(
         return await ResumeAsync(checkpoint, cancellationToken);
     }
 
-    public async Task<WorkflowResumeResponse> ResumeAsync(WorkflowCheckpoint checkpoint, CancellationToken cancellationToken = default)
+    public async Task<LegacyWorkflowResumeResponse> ResumeAsync(WorkflowCheckpoint checkpoint, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -418,7 +390,7 @@ internal sealed class WorkflowExecutionScheduler(
             cancellationToken: CancellationToken.None,
             executeAsync: token => workflowRunner.ResumeAsync(normalizedCheckpoint, _workflowExecutors, token));
 
-        return new WorkflowResumeResponse(
+        return new LegacyWorkflowResumeResponse(
             checkpoint.SessionId,
             WorkflowCheckpointStatus.Running.ToString(),
             ResolveResumePoint(normalizedCheckpoint));
@@ -521,7 +493,7 @@ internal sealed class WorkflowQueryService(
 {
     private const int SqlAnalysisStepCount = 6;
 
-    public async Task<WorkflowStatusResponse?> GetAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    public async Task<LegacyWorkflowStatusResponse?> GetAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
         var checkpoint = await checkpointStorage.LoadCheckpointAsync(sessionId, cancellationToken);
         if (checkpoint is null)
@@ -553,7 +525,7 @@ internal sealed class WorkflowQueryService(
             ? null
             : errorElement.Deserialize<string>();
 
-        return new WorkflowStatusResponse(
+        return new LegacyWorkflowStatusResponse(
             checkpoint.SessionId,
             checkpoint.WorkflowType,
             checkpoint.Status.ToString(),
@@ -594,3 +566,21 @@ internal sealed class WorkflowQueryService(
         return Math.Clamp(progress, 0, 99);
     }
 }
+
+// Legacy DTOs for backward compatibility with old scheduler
+internal sealed record LegacyWorkflowStartResponse(Guid SessionId, string Status, DateTimeOffset StartedAt);
+internal sealed record LegacyWorkflowCancelResponse(Guid SessionId, string Status);
+internal sealed record LegacyWorkflowResumeResponse(Guid SessionId, string Status, string ResumedFrom);
+internal sealed record LegacyWorkflowStatusResponse(
+    Guid SessionId,
+    string WorkflowType,
+    string Status,
+    string? CurrentExecutor,
+    int Progress,
+    DateTimeOffset StartedAt,
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? CompletedAt,
+    WorkflowResultEnvelope? Result,
+    Guid? ReviewId,
+    string? ReviewStatus,
+    string? ErrorMessage);

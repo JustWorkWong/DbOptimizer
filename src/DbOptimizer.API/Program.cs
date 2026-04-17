@@ -132,9 +132,8 @@ builder.Services.AddSingleton<IWorkflowEventQueryService>(serviceProvider => ser
 builder.Services.AddSingleton<IWorkflowStateMachine, WorkflowStateMachine>();
 builder.Services.AddSingleton<IWorkflowExecutionAuditService, WorkflowExecutionAuditService>();
 builder.Services.AddSingleton<IWorkflowRunner, WorkflowRunner>();
-builder.Services.AddSingleton<IWorkflowExecutionScheduler, WorkflowExecutionScheduler>();
-builder.Services.AddSingleton<IWorkflowQueryService, WorkflowQueryService>();
 builder.Services.AddSingleton<IWorkflowResultSerializer, WorkflowResultSerializer>();
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Application.IWorkflowApplicationService, DbOptimizer.Infrastructure.Workflows.Application.WorkflowApplicationService>();
 builder.Services.AddSingleton<IReviewApplicationService, ReviewApplicationService>();
 builder.Services.AddSingleton<IHistoryQueryService, HistoryQueryService>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.ISqlParser, DbOptimizer.Infrastructure.Workflows.LightweightSqlParser>();
