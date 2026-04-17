@@ -80,11 +80,6 @@ var api = builder.AddProject<Projects.DbOptimizer_API>("api", options =>
     .WithReference(mySqlDb)
     .WithReference(redis);
 
-builder.AddProject<Projects.DbOptimizer_AgentRuntime>("agentruntime")
-    .WithReference(postgresDb)
-    .WithReference(mySqlDb)
-    .WithReference(redis);
-
 builder.AddViteApp("web", "../DbOptimizer.Web")
     .WithEndpoint("http", endpoint =>
     {

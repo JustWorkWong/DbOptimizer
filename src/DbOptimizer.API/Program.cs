@@ -131,6 +131,23 @@ builder.Services.AddSingleton(executionPlanOptions);
 builder.Services.AddSingleton(workflowRuntimeOptions);
 builder.Services.AddSingleton(configCollectionOptions);
 builder.Services.AddSingleton(slowQueryCollectionOptions);
+
+// MCP 服务注册
+var mcpOptions = builder.Configuration.GetSection("DbOptimizer:Mcp").Get<DbOptimizer.Infrastructure.Mcp.McpOptions>()
+    ?? throw new InvalidOperationException("Missing required configuration section: DbOptimizer:Mcp");
+var mcpFallbackOptions = new DbOptimizer.Infrastructure.Mcp.McpFallbackOptions
+{
+    MySqlConnectionString = builder.Configuration.GetConnectionString("mysql") ?? throw new InvalidOperationException("Missing MySQL connection string"),
+    PostgreSqlConnectionString = postgreSqlConnectionString,
+    TimeoutSeconds = mcpOptions.TimeoutSeconds
+};
+builder.Services.AddSingleton(mcpOptions);
+builder.Services.AddSingleton(mcpFallbackOptions);
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Mcp.IDatabaseMcpFallbackExecutor, DbOptimizer.Infrastructure.Mcp.DatabaseMcpFallbackExecutor>();
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Mcp.MySqlMcpClient>();
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Mcp.PostgreSqlMcpClient>();
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Mcp.IMcpClientFactory, DbOptimizer.Infrastructure.Mcp.McpClientFactory>();
+
 builder.Services.AddSingleton<IExecutionPlanProvider, ExecutionPlanProvider>();
 builder.Services.AddSingleton<IExecutionPlanAnalyzer, ExecutionPlanAnalyzer>();
 builder.Services.AddSingleton<ITableIndexMetadataProvider, TableIndexMetadataProvider>();

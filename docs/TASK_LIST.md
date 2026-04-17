@@ -10,7 +10,7 @@
 - 联调验收数据库使用 Aspire 创建的 PostgreSQL + MySQL 测试库（固定端口/账号/密码由测试环境配置文件统一管理，不在业务代码中写死；脚本初始化数据）
 
 **当前里程碑进展（2026-04-16）**：
-- [x] M0-01 Aspire 编排落地（API / AgentRuntime / Web / PostgreSQL / MySQL / Redis 已纳入 AppHost）
+- [x] M0-01 Aspire 编排落地（API / Web / PostgreSQL / MySQL / Redis 已纳入 AppHost）
 - [x] M0-02 配置体系与密钥管理（连接串/AI/MCP 配置化，支持本地覆盖与环境变量）
 - [x] M0-03 可观测性与日志治理（requestId/sessionId/executionId 已落地）
 - [x] M0-04 AI Provider 接入配置（endpoint/model/apiKey/requestTimeout/maxTokens 配置化，支持本地密钥覆盖）
@@ -36,7 +36,7 @@
 
 #### M0-基础设施与工程骨架
 1. **M0-01 Aspire 编排落地**
-   - 内容：AppHost 编排 API / AgentRuntime / Web / PostgreSQL / Redis
+   - 内容：AppHost 编排 API / Web / PostgreSQL / Redis
    - 依赖：无
    - 交付：可一键启动全栈开发环境
 2. **M0-02 配置体系与密钥管理**
@@ -44,7 +44,7 @@
    - 依赖：M0-01
    - 交付：本地/测试环境可稳定加载配置
 3. **M0-03 可观测性与日志治理（Aspire 托管）**
-   - 内容：使用 Aspire 对 API/AgentRuntime 的日志进行统一采集与查看；保留 requestId/sessionId/executionId 结构化字段
+   - 内容：使用 Aspire 对 API 的日志进行统一采集与查看；保留 requestId/sessionId/executionId 结构化字段
    - 依赖：M0-01
    - 交付：可按 Workflow 全链路追踪日志（无需手动维护独立日志链路）
 4. **M0-04 AI Provider 接入配置（配置驱动）**

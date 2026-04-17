@@ -108,33 +108,29 @@
 src/
 ├── DbOptimizer.AppHost/          # Aspire 编排入口
 ├── DbOptimizer.API/              # Web API + SSE 端点
-├── DbOptimizer.AgentRuntime/     # MAF Agent 运行时
-├── DbOptimizer.Core/             # 核心业务逻辑
-│   ├── Workflows/                # Workflow 定义
-│   ├── Executors/                # Executor 实现
-│   ├── Services/                 # 业务服务
+├── DbOptimizer.Core/             # 核心业务模型
 │   └── Models/                   # 领域模型
-├── DbOptimizer.Infrastructure/   # 基础设施
-│   ├── Database/                 # EF Core + Repositories
-│   ├── AI/                       # Azure OpenAI / Anthropic
-│   ├── MCP/                      # MCP 客户端
-│   └── Cache/                    # Redis 缓存
-├── DbOptimizer.Web/              # Vue 3 前端
-└── DbOptimizer.Shared/           # 共享 DTOs + Validators
+├── DbOptimizer.Infrastructure/   # 基础设施层
+│   ├── Workflows/                # Workflow 定义与执行器
+│   ├── Persistence/              # EF Core + Repositories
+│   ├── SlowQuery/                # 慢查询收集
+│   ├── Checkpointing/            # Checkpoint 存储
+│   └── Mcp/                      # MCP 客户端
+└── DbOptimizer.Web/              # Vue 3 前端
 ```
 
 ### 2.2 分层职责
 
 | 层级 | 职责 | 依赖方向 |
 |------|------|---------|
-| **Presentation** | API Controllers, SSE Endpoints | → Application |
-| **Application** | Workflows, Executors, Services | → Domain, Infrastructure |
-| **Domain** | 领域模型, 业务规则 | 无外部依赖 |
-| **Infrastructure** | 数据库, AI, MCP, 缓存 | → Domain |
+| **Presentation** | API Controllers, SSE Endpoints | → Infrastructure |
+| **Infrastructure** | Workflows, Executors, Database, MCP | → Core |
+| **Core** | 领域模型, 业务规则 | 无外部依赖 |
 
 **依赖倒置原则**：
-- Core 层定义接口（如 `IMcpClient`, `ICheckpointStorage`）
-- Infrastructure 层实现接口
+- Core 层定义纯业务模型（ParsedSqlModels, ExecutionPlanModels）
+- Infrastructure 层实现所有基础设施（Workflows, Database, MCP）
+- API 层调用 Infrastructure 提供的服务
 - 通过 DI 注入依赖
 
 ---
@@ -193,38 +189,29 @@ src/
 │  (Controllers, SSE Endpoints, Middleware)                   │
 └────────────────────────┬────────────────────────────────────┘
                          │
-         ┌───────────────┼───────────────┐
-         │               │               │
-┌────────▼────────┐ ┌───▼──────────┐ ┌─▼────────────────┐
-│ DbOptimizer.    │ │ DbOptimizer. │ │ DbOptimizer.     │
-│ AgentRuntime    │ │ Core         │ │ Infrastructure   │
-│                 │ │              │ │                  │
-│ • MAF Agents    │ │ • Workflows  │ │ • Database       │
-│ • Tools         │ │ • Executors  │ │ • AI Clients     │
-│ • Prompts       │ │ • Services   │ │ • MCP Clients    │
-└─────────────────┘ └───┬──────────┘ │ • Cache          │
-                        │            └──────────────────┘
-                        │
-                ┌───────▼────────┐
-                │ DbOptimizer.   │
-                │ Shared         │
-                │                │
-                │ • DTOs         │
-                │ • Validators   │
-                └────────────────┘
+         ┌───────────────┴───────────────┐
+         │                               │
+┌────────▼────────┐             ┌───────▼──────────────┐
+│ DbOptimizer.    │             │ DbOptimizer.         │
+│ Infrastructure  │             │ Core                 │
+│                 │             │                      │
+│ • Workflows     │────────────→│ • Models             │
+│ • Executors     │             │ • Domain Objects     │
+│ • Persistence   │             │                      │
+│ • MCP Clients   │             │                      │
+│ • Checkpointing │             │                      │
+└─────────────────┘             └──────────────────────┘
 ```
 
 ### 4.2 依赖规则
 
 **允许的依赖**：
-- API → Core, Infrastructure, Shared
-- Core → Shared
-- Infrastructure → Core, Shared
-- AgentRuntime → Core, Infrastructure, Shared
+- API → Infrastructure, Core
+- Infrastructure → Core
 
 **禁止的依赖**：
-- Core → Infrastructure（通过接口反转依赖）
-- Shared → 任何其他项目
+- Core → Infrastructure（Core 保持纯净，无基础设施依赖）
+- Core → API
 
 ---
 

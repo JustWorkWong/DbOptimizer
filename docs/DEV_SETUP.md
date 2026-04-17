@@ -85,11 +85,9 @@ tree -L 2 src/
 src/
 ├── DbOptimizer.AppHost/          # Aspire 编排
 ├── DbOptimizer.API/              # Web API + SSE 端点
-├── DbOptimizer.AgentRuntime/     # MAF Agent 运行时
 ├── DbOptimizer.Core/             # Workflows + Executors + Services + Models
 ├── DbOptimizer.Infrastructure/   # Database + AI + MCP + Repositories
-├── DbOptimizer.Web/              # Vue 3 前端
-└── DbOptimizer.Shared/           # DTOs + Validators
+└── DbOptimizer.Web/              # Vue 3 前端
 ```
 
 ---

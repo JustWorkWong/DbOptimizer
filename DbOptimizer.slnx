@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/DbOptimizer.AgentRuntime/DbOptimizer.AgentRuntime.csproj" />
+    <Project Path="src/DbOptimizer.Core/DbOptimizer.Core.csproj" />
+    <Project Path="src/DbOptimizer.Infrastructure/DbOptimizer.Infrastructure.csproj" />
     <Project Path="src/DbOptimizer.API/DbOptimizer.API.csproj" />
     <Project Path="src/DbOptimizer.AppHost/DbOptimizer.AppHost.csproj" />
   </Folder>
