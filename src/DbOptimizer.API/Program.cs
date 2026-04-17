@@ -226,6 +226,7 @@ builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Review.IWorkf
 builder.Services.AddSingleton<ISlowQueryCollector, SlowQueryCollector>();
 builder.Services.AddSingleton<ISlowQueryNormalizer, SlowQueryNormalizer>();
 builder.Services.AddSingleton<ISlowQueryRepository, SlowQueryRepository>();
+builder.Services.AddSingleton<ISlowQueryWorkflowSubmissionService, SlowQueryWorkflowSubmissionService>();
 builder.Services.AddSingleton<MigrationReadinessState>();
 builder.Services.AddHostedService<EfMigrationHostedService>();
 builder.Services.AddHostedService<RunningWorkflowRecoveryHostedService>();

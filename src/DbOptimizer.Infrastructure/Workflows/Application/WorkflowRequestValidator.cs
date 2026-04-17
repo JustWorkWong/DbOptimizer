@@ -74,6 +74,8 @@ public sealed class CreateSqlAnalysisWorkflowRequest
     public string DatabaseId { get; init; } = string.Empty;
     public string? DatabaseEngine { get; init; }
     public SqlAnalysisWorkflowOptions Options { get; init; } = new();
+    public string SourceType { get; init; } = "manual";
+    public Guid? SourceRefId { get; init; }
 }
 
 /// <summary>

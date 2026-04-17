@@ -1,8 +1,13 @@
 using System.Text.Json;
 using DbOptimizer.API.Api;
+using DbOptimizer.Core.Models;
 using DbOptimizer.Infrastructure.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
+using DbOptimizer.Infrastructure.Workflows.Application;
+using DbOptimizer.Infrastructure.Workflows.Review;
+using DbOptimizer.Infrastructure.Maf.Runtime;
+using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -133,7 +138,10 @@ public sealed class ReviewApplicationServiceTests
                 CheckpointStorage,
                 WorkflowExecutionScheduler,
                 new WorkflowResultSerializer(),
-                WorkflowEventPublisher);
+                WorkflowEventPublisher,
+                new StubWorkflowReviewTaskGateway(),
+                new StubWorkflowReviewResponseFactory(),
+                new StubMafWorkflowRuntime());
         }
 
         public static async Task<ReviewServiceHarness> CreateAsync()
@@ -285,30 +293,30 @@ public sealed class ReviewApplicationServiceTests
     {
         public WorkflowCheckpoint? ResumedCheckpoint { get; private set; }
 
-        public Task<WorkflowStartResponse> ScheduleSqlAnalysisAsync(CreateSqlAnalysisWorkflowRequest request, CancellationToken cancellationToken = default)
+        public Task<LegacyWorkflowStartResponse> ScheduleSqlAnalysisAsync(CreateSqlAnalysisWorkflowRequest request, CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
         }
 
-        public Task<WorkflowStartResponse> ScheduleDbConfigOptimizationAsync(CreateDbConfigOptimizationWorkflowRequest request, CancellationToken cancellationToken = default)
+        public Task<LegacyWorkflowStartResponse> ScheduleDbConfigOptimizationAsync(CreateDbConfigOptimizationWorkflowRequest request, CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
         }
 
-        public Task<WorkflowCancelResponse> CancelAsync(Guid sessionId, CancellationToken cancellationToken = default)
+        public Task<LegacyWorkflowCancelResponse> CancelAsync(Guid sessionId, CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
         }
 
-        public Task<WorkflowResumeResponse> ResumeAsync(Guid sessionId, CancellationToken cancellationToken = default)
+        public Task<LegacyWorkflowResumeResponse> ResumeAsync(Guid sessionId, CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
         }
 
-        public Task<WorkflowResumeResponse> ResumeAsync(WorkflowCheckpoint checkpoint, CancellationToken cancellationToken = default)
+        public Task<LegacyWorkflowResumeResponse> ResumeAsync(WorkflowCheckpoint checkpoint, CancellationToken cancellationToken = default)
         {
             ResumedCheckpoint = checkpoint;
-            return Task.FromResult(new WorkflowResumeResponse(checkpoint.SessionId, "Running", "RegenerationExecutor"));
+            return Task.FromResult(new LegacyWorkflowResumeResponse(checkpoint.SessionId, "Running", "RegenerationExecutor"));
         }
     }
 
@@ -320,6 +328,99 @@ public sealed class ReviewApplicationServiceTests
         {
             PublishedEvents.Add(workflowEvent);
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class StubWorkflowReviewTaskGateway : IWorkflowReviewTaskGateway
+    {
+        public Task<Guid> CreateAsync(
+            Guid sessionId,
+            string taskType,
+            string requestId,
+            string engineRunId,
+            string checkpointRef,
+            WorkflowResultEnvelope payload,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<ReviewTaskCorrelation?> GetCorrelationAsync(
+            Guid taskId,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task UpdateStatusAsync(
+            Guid taskId,
+            string status,
+            string? comment,
+            string? adjustmentsJson,
+            DateTimeOffset reviewedAt,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+    }
+
+    private sealed class StubWorkflowReviewResponseFactory : IWorkflowReviewResponseFactory
+    {
+        public ReviewDecisionResponseMessage CreateSqlResponse(
+            Guid sessionId,
+            Guid taskId,
+            string requestId,
+            string runId,
+            string checkpointRef,
+            string action,
+            string? comment,
+            IReadOnlyDictionary<string, JsonElement> adjustments)
+        {
+            throw new NotSupportedException();
+        }
+
+        public object CreateDbConfigResponse(
+            Guid sessionId,
+            Guid taskId,
+            string requestId,
+            string runId,
+            string checkpointRef,
+            string action,
+            string? comment,
+            IReadOnlyDictionary<string, JsonElement> adjustments)
+        {
+            throw new NotSupportedException();
+        }
+    }
+
+    private sealed class StubMafWorkflowRuntime : IMafWorkflowRuntime
+    {
+        public Task<DbOptimizer.Infrastructure.Maf.Runtime.WorkflowStartResponse> StartSqlAnalysisAsync(
+            DbOptimizer.Infrastructure.Maf.Runtime.SqlAnalysisWorkflowCommand command,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<DbOptimizer.Infrastructure.Maf.Runtime.WorkflowStartResponse> StartDbConfigOptimizationAsync(
+            DbOptimizer.Infrastructure.Maf.Runtime.DbConfigWorkflowCommand command,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<DbOptimizer.Infrastructure.Maf.Runtime.WorkflowResumeResponse> ResumeAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<DbOptimizer.Infrastructure.Maf.Runtime.WorkflowCancelResponse> CancelAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
         }
     }
 }

@@ -10,12 +10,13 @@ namespace DbOptimizer.Infrastructure.SlowQuery;
  * 1) 保存规范化慢查询到 slow_queries 表
  * 2) 去重逻辑：根据 QueryHash + DatabaseId + 时间窗口（1 小时）
  * 3) 更新 ExecutionCount 和 AvgExecutionTime
+ * 4) 更新 latest_analysis_session_id
  * ========================= */
 public sealed class SlowQueryRepository(IDbContextFactory<DbOptimizerDbContext> dbContextFactory) : ISlowQueryRepository
 {
     private static readonly TimeSpan DeduplicationWindow = TimeSpan.FromHours(1);
 
-    public async Task SaveAsync(NormalizedSlowQuery normalized, CancellationToken cancellationToken = default)
+    public async Task<SlowQueryEntity> SaveAsync(NormalizedSlowQuery normalized, CancellationToken cancellationToken = default)
     {
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -40,6 +41,9 @@ public sealed class SlowQueryRepository(IDbContextFactory<DbOptimizerDbContext> 
                 : existing.MaxExecutionTime;
             existing.LastSeenAt = normalized.ExecutedAt;
             existing.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return existing;
         }
         else
         {
@@ -65,9 +69,28 @@ public sealed class SlowQueryRepository(IDbContextFactory<DbOptimizerDbContext> 
             };
 
             dbContext.SlowQueries.Add(entity);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return entity;
         }
+    }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+    public async Task UpdateLatestAnalysisSessionAsync(
+        Guid queryId,
+        Guid sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var entity = await dbContext.SlowQueries
+            .Where(q => q.QueryId == queryId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (entity != null)
+        {
+            entity.LatestAnalysisSessionId = sessionId;
+            entity.UpdatedAt = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
     }
 
     public async Task<IReadOnlyList<SlowQueryEntity>> GetRecentSlowQueriesAsync(
@@ -87,6 +110,7 @@ public sealed class SlowQueryRepository(IDbContextFactory<DbOptimizerDbContext> 
 
 public interface ISlowQueryRepository
 {
-    Task SaveAsync(NormalizedSlowQuery normalized, CancellationToken cancellationToken = default);
+    Task<SlowQueryEntity> SaveAsync(NormalizedSlowQuery normalized, CancellationToken cancellationToken = default);
+    Task UpdateLatestAnalysisSessionAsync(Guid queryId, Guid sessionId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SlowQueryEntity>> GetRecentSlowQueriesAsync(string databaseId, int limit = 100, CancellationToken cancellationToken = default);
 }

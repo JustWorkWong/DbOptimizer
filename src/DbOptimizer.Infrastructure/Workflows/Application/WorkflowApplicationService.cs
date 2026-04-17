@@ -42,9 +42,23 @@ public sealed class WorkflowApplicationService(
         context.Set(WorkflowContextKeys.DatabaseType, databaseEngine);
         context.Set(WorkflowContextKeys.DatabaseDialect, databaseEngine);
         context.Set("Options", request.Options);
+        context.Set("SourceType", request.SourceType);
+        if (request.SourceRefId.HasValue)
+        {
+            context.Set("SourceRefId", request.SourceRefId.Value);
+        }
         context.AdvanceCheckpointVersion();
 
         await checkpointStorage.SaveCheckpointAsync(context.CreateCheckpointSnapshot(), cancellationToken);
+
+        // 写入 workflow_sessions 表，包含 source_type 和 source_ref_id
+        await CreateWorkflowSessionEntityAsync(
+            sessionId,
+            "SqlAnalysis",
+            request.SourceType,
+            request.SourceRefId,
+            cancellationToken);
+
         ScheduleBackgroundExecution(
             sessionId,
             cancellationToken: CancellationToken.None,
@@ -374,5 +388,33 @@ public sealed class WorkflowApplicationService(
 
         options.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
         return options;
+    }
+
+    private async Task CreateWorkflowSessionEntityAsync(
+        Guid sessionId,
+        string workflowType,
+        string sourceType,
+        Guid? sourceRefId,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var entity = new WorkflowSessionEntity
+        {
+            SessionId = sessionId,
+            WorkflowType = workflowType,
+            Status = "Running",
+            State = "{}",
+            EngineType = "legacy",
+            EngineRunId = string.Empty,
+            EngineCheckpointRef = string.Empty,
+            SourceType = sourceType,
+            SourceRefId = sourceRefId,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        dbContext.WorkflowSessions.Add(entity);
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 }
