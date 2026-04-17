@@ -36,6 +36,8 @@ var configCollectionOptions = builder.Configuration.GetSection(ConfigCollectionO
     ?? new ConfigCollectionOptions();
 var slowQueryCollectionOptions = builder.Configuration.GetSection(SlowQueryCollectionOptions.SectionName).Get<SlowQueryCollectionOptions>()
     ?? new SlowQueryCollectionOptions();
+var tokenUsageRecorderOptions = builder.Configuration.GetSection("TokenUsageRecorder").Get<DbOptimizer.Infrastructure.Workflows.Monitoring.TokenUsageRecorderOptions>()
+    ?? new DbOptimizer.Infrastructure.Workflows.Monitoring.TokenUsageRecorderOptions();
 
 builder.Logging.Configure(options =>
 {
@@ -141,6 +143,7 @@ builder.Services.AddSingleton<IHistoryQueryService, HistoryQueryService>();
 // Workflow 事件投影与监控服务
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Events.IMafWorkflowEventAdapter, DbOptimizer.Infrastructure.Workflows.Events.MafWorkflowEventAdapter>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Events.IWorkflowProgressCalculator, DbOptimizer.Infrastructure.Workflows.Events.WorkflowProgressCalculator>();
+builder.Services.AddSingleton(Microsoft.Extensions.Options.Options.Create(tokenUsageRecorderOptions));
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Monitoring.ITokenUsageRecorder, DbOptimizer.Infrastructure.Workflows.Monitoring.TokenUsageRecorder>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Projection.IWorkflowProjectionWriter, DbOptimizer.Infrastructure.Workflows.Projection.WorkflowProjectionWriter>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.ISqlParser, DbOptimizer.Infrastructure.Workflows.LightweightSqlParser>();
