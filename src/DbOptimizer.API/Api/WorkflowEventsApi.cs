@@ -27,98 +27,133 @@ internal static class WorkflowEventsApiRouteBuilderExtensions
         IMafWorkflowEventAdapter mafWorkflowEventAdapter,
         CancellationToken cancellationToken)
     {
-        var workflow = await workflowApplicationService.GetAsync(sessionId, cancellationToken);
-        if (workflow is null)
-        {
-            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
-            await httpContext.Response.WriteAsJsonAsync(
-                new ApiEnvelope<object?>(
-                    false,
-                    null,
-                    new ApiError("WORKFLOW_NOT_FOUND", "Workflow session not found.", new { sessionId }),
-                    new ApiMeta(httpContext.TraceIdentifier, DateTimeOffset.UtcNow)),
-                cancellationToken);
-            return;
-        }
-
-        var response = httpContext.Response;
-        response.Headers.ContentType = "text/event-stream";
-        response.Headers.CacheControl = "no-cache";
-        response.Headers.Connection = "keep-alive";
-
-        var lastEventIdHeader = httpContext.Request.Headers["Last-Event-ID"].ToString();
-        _ = long.TryParse(lastEventIdHeader, out var lastEventId);
-
-        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var persistedState = await dbContext.WorkflowSessions
-            .AsNoTracking()
-            .Where(item => item.SessionId == sessionId)
-            .Select(item => item.State)
-            .SingleAsync(cancellationToken);
-        var checkpoint = WorkflowCheckpointJson.Deserialize(persistedState);
-        var mafEvents = WorkflowTimeline.GetEvents(checkpoint)
-            .Where(item => item.Sequence > lastEventId)
-            .OrderBy(item => item.Sequence)
-            .ToArray();
-
-        var businessEvents = mafWorkflowEventAdapter.Map(sessionId, workflow.WorkflowType, mafEvents);
-
-        var highestPersistedSequence = businessEvents.LastOrDefault()?.Sequence ?? lastEventId;
-        foreach (var businessEvent in businessEvents)
-        {
-            await WriteBusinessEventAsync(response, businessEvent, cancellationToken);
-        }
-
-        await WriteSnapshotAsync(response, workflow, mafWorkflowEventAdapter, cancellationToken);
-
-        var subscription = workflowEventQueryService.Subscribe(sessionId, highestPersistedSequence);
         try
         {
-            var backlogBusinessEvents = mafWorkflowEventAdapter.Map(sessionId, workflow.WorkflowType, subscription.Backlog);
-            foreach (var backlogEvent in backlogBusinessEvents)
+            var workflow = await workflowApplicationService.GetAsync(sessionId, cancellationToken);
+            if (workflow is null)
             {
-                await WriteBusinessEventAsync(response, backlogEvent, cancellationToken);
+                httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+                await httpContext.Response.WriteAsJsonAsync(
+                    new ApiEnvelope<object?>(
+                        false,
+                        null,
+                        new ApiError("WORKFLOW_NOT_FOUND", "Workflow session not found.", new { sessionId }),
+                        new ApiMeta(httpContext.TraceIdentifier, DateTimeOffset.UtcNow)),
+                    cancellationToken);
+                return;
             }
 
-            var lastHeartbeat = DateTime.UtcNow;
-            var heartbeatInterval = TimeSpan.FromSeconds(30);
+            var response = httpContext.Response;
+            response.Headers.ContentType = "text/event-stream";
+            response.Headers.CacheControl = "no-cache";
+            response.Headers.Connection = "keep-alive";
 
-            while (!cancellationToken.IsCancellationRequested)
+            var lastEventIdHeader = httpContext.Request.Headers["Last-Event-ID"].ToString();
+            _ = long.TryParse(lastEventIdHeader, out var lastEventId);
+
+            await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var persistedState = await dbContext.WorkflowSessions
+                .AsNoTracking()
+                .Where(item => item.SessionId == sessionId)
+                .Select(item => item.State)
+                .SingleAsync(cancellationToken);
+            var checkpoint = WorkflowCheckpointJson.Deserialize(persistedState);
+            var mafEvents = WorkflowTimeline.GetEvents(checkpoint)
+                .Where(item => item.Sequence > lastEventId)
+                .OrderBy(item => item.Sequence)
+                .ToArray();
+
+            var businessEvents = mafWorkflowEventAdapter.Map(sessionId, workflow.WorkflowType, mafEvents);
+
+            var highestPersistedSequence = businessEvents.LastOrDefault()?.Sequence ?? lastEventId;
+            foreach (var businessEvent in businessEvents)
             {
-                var timeUntilHeartbeat = heartbeatInterval - (DateTime.UtcNow - lastHeartbeat);
-                var timeout = timeUntilHeartbeat > TimeSpan.Zero ? timeUntilHeartbeat : TimeSpan.FromMilliseconds(1);
+                await WriteBusinessEventAsync(response, businessEvent, cancellationToken);
+            }
 
-                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeoutCts.CancelAfter(timeout);
+            await WriteSnapshotAsync(response, workflow, mafWorkflowEventAdapter, cancellationToken);
 
-                try
+            var subscription = workflowEventQueryService.Subscribe(sessionId, highestPersistedSequence);
+            try
+            {
+                var backlogBusinessEvents = mafWorkflowEventAdapter.Map(sessionId, workflow.WorkflowType, subscription.Backlog);
+                foreach (var backlogEvent in backlogBusinessEvents)
                 {
-                    var hasData = await subscription.Reader.WaitToReadAsync(timeoutCts.Token);
-                    if (hasData)
-                    {
-                        var newEvents = new List<WorkflowEventRecord>();
-                        while (subscription.Reader.TryRead(out var mafEvent))
-                        {
-                            newEvents.Add(mafEvent);
-                        }
+                    await WriteBusinessEventAsync(response, backlogEvent, cancellationToken);
+                }
 
-                        var newBusinessEvents = mafWorkflowEventAdapter.Map(sessionId, workflow.WorkflowType, newEvents);
-                        foreach (var businessEvent in newBusinessEvents)
+                var lastHeartbeat = DateTime.UtcNow;
+                var heartbeatInterval = TimeSpan.FromSeconds(30);
+
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    var timeUntilHeartbeat = heartbeatInterval - (DateTime.UtcNow - lastHeartbeat);
+                    var timeout = timeUntilHeartbeat > TimeSpan.Zero ? timeUntilHeartbeat : TimeSpan.FromMilliseconds(1);
+
+                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    timeoutCts.CancelAfter(timeout);
+
+                    try
+                    {
+                        var hasData = await subscription.Reader.WaitToReadAsync(timeoutCts.Token);
+                        if (hasData)
                         {
-                            await WriteBusinessEventAsync(response, businessEvent, cancellationToken);
+                            var newEvents = new List<WorkflowEventRecord>();
+                            while (subscription.Reader.TryRead(out var mafEvent))
+                            {
+                                newEvents.Add(mafEvent);
+                            }
+
+                            var newBusinessEvents = mafWorkflowEventAdapter.Map(sessionId, workflow.WorkflowType, newEvents);
+                            foreach (var businessEvent in newBusinessEvents)
+                            {
+                                await WriteBusinessEventAsync(response, businessEvent, cancellationToken);
+                            }
                         }
                     }
-                }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                {
-                    await WriteHeartbeatAsync(response, cancellationToken);
-                    lastHeartbeat = DateTime.UtcNow;
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        await WriteHeartbeatAsync(response, cancellationToken);
+                        lastHeartbeat = DateTime.UtcNow;
+                    }
                 }
             }
+            finally
+            {
+                subscription.Dispose();
+            }
         }
-        finally
+        catch (OperationCanceledException)
         {
-            subscription.Dispose();
+            // Client disconnected, this is expected
+        }
+        catch (Exception ex)
+        {
+            // Log error but don't throw - SSE connection is already established
+            var loggerFactory = httpContext.RequestServices.GetRequiredService<ILoggerFactory>();
+            var logger = loggerFactory.CreateLogger("DbOptimizer.API.WorkflowEventsApi");
+            logger.LogError(ex, "Error streaming workflow events for session {SessionId}", sessionId);
+
+            try
+            {
+                var errorPayload = JsonSerializer.Serialize(new
+                {
+                    error = "STREAM_ERROR",
+                    message = "An error occurred while streaming events",
+                    sessionId
+                }, SerializerOptions);
+
+                var builder = new StringBuilder();
+                builder.Append("event: error").AppendLine();
+                builder.Append("data: ").Append(errorPayload).AppendLine().AppendLine();
+
+                await httpContext.Response.WriteAsync(builder.ToString(), CancellationToken.None);
+                await httpContext.Response.Body.FlushAsync(CancellationToken.None);
+            }
+            catch
+            {
+                // If we can't write the error, connection is likely broken
+            }
         }
     }
 

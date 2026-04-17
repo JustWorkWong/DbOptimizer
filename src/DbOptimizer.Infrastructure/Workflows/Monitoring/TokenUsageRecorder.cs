@@ -2,6 +2,7 @@ using System.Text.Json;
 using DbOptimizer.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace DbOptimizer.Infrastructure.Workflows.Monitoring;
 
@@ -11,10 +12,12 @@ namespace DbOptimizer.Infrastructure.Workflows.Monitoring;
 /// </summary>
 public sealed class TokenUsageRecorder(
     IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
+    IOptions<TokenUsageRecorderOptions> options,
     ILogger<TokenUsageRecorder> logger) : ITokenUsageRecorder
 {
     private const decimal InputTokenCostPer1M = 3.0m;
     private const decimal OutputTokenCostPer1M = 15.0m;
+    private readonly TokenUsageRecorderOptions _options = options.Value;
 
     public async Task RecordAsync(
         Guid sessionId,
@@ -29,12 +32,15 @@ public sealed class TokenUsageRecorder(
 
         try
         {
-            await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(_options.QueryTimeoutSeconds));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+
+            await using var dbContext = await dbContextFactory.CreateDbContextAsync(linkedCts.Token);
 
             var execution = await dbContext.AgentExecutions
                 .Where(x => x.SessionId == sessionId && x.ExecutorName == executorName)
                 .OrderByDescending(x => x.StartedAt)
-                .FirstOrDefaultAsync(cancellationToken);
+                .FirstOrDefaultAsync(linkedCts.Token);
 
             if (execution is null)
             {
@@ -46,7 +52,7 @@ public sealed class TokenUsageRecorder(
             }
 
             execution.TokenUsage = tokenUsage.Value.GetRawText();
-            await dbContext.SaveChangesAsync(cancellationToken);
+            await dbContext.SaveChangesAsync(linkedCts.Token);
 
             logger.LogInformation(
                 "Token usage recorded. SessionId={SessionId}, ExecutorName={ExecutorName}, TokenUsage={TokenUsage}",
