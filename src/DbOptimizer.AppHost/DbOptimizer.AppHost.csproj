@@ -17,7 +17,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DbOptimizer.API\DbOptimizer.API.csproj" />
-    <ProjectReference Include="..\DbOptimizer.AgentRuntime\DbOptimizer.AgentRuntime.csproj" />
   </ItemGroup>
 
 </Project>

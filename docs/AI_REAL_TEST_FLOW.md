@@ -21,7 +21,7 @@ It covers:
 
 Optional:
 
-- if you want to test the AI runtime configuration itself, keep the local-only file `src/DbOptimizer.AgentRuntime/appsettings.Local.json` populated and excluded from git
+- if you want to test the AI runtime configuration itself, keep the local-only file `src/DbOptimizer.API/appsettings.Local.json` populated and excluded from git
 
 ## Local Dependencies
 
