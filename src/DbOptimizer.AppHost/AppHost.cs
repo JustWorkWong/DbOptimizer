@@ -59,6 +59,9 @@ var redis = builder.AddRedis("redis")
     });
 
 var api = builder.AddProject<Projects.DbOptimizer_API>("api")
+    .WaitFor(postgresDb)
+    .WaitFor(mySqlDb)
+    .WaitFor(redis)
     .WithReference(postgresDb)
     .WithReference(mySqlDb)
     .WithReference(redis);

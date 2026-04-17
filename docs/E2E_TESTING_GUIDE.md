@@ -137,10 +137,10 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'echo "请手动启动 Aspire: cd ../../src/DbOptimizer.AppHost && dotnet run"',
+    command: 'echo "请在独立终端手动启动 Aspire: cd ../../src/DbOptimizer.AppHost && dotnet run"',
     url: 'http://localhost:5173',
     reuseExistingServer: true, // 使用已运行的服务
-    timeout: 120 * 1000,
+    timeout: 180 * 1000, // 增加到 180 秒
   },
 });
 ```
@@ -149,12 +149,20 @@ export default defineConfig({
 
 ## 5. 启动应用
 
-### 5.1 启动 Aspire（推荐方式）
+### 5.1 启动 Aspire（必须在独立终端）
 
-```bash
-cd E:\wfcodes\DbOptimizer\src\DbOptimizer.AppHost
-dotnet run
-```
+**⚠️ 重要**：Aspire Dashboard 需要交互式终端，不能后台运行。
+
+**步骤**：
+1. 打开新的终端窗口（PowerShell/CMD/Git Bash）
+2. 执行启动命令：
+   ```bash
+   cd E:\wfcodes\DbOptimizer\src\DbOptimizer.AppHost
+   dotnet run
+   ```
+3. 等待所有服务启动（约 60-90 秒，首次启动需要 2-3 分钟拉取镜像）
+4. 浏览器会自动打开 Aspire Dashboard (http://localhost:18888)
+5. **保持此终端窗口打开**，不要关闭
 
 **Aspire 会自动启动**：
 - PostgreSQL 容器（端口 15432）
@@ -164,21 +172,42 @@ dotnet run
 - Vue 前端（端口 5173）
 - Aspire Dashboard（端口 18888）
 
-**等待所有服务启动**（约 30-60 秒），浏览器会自动打开 Aspire Dashboard。
+**启动成功标志**：
+- Aspire Dashboard 显示所有服务状态为 "Running"（绿色）
+- 控制台输出 "Application started. Press Ctrl+C to shut down."
 
-### 5.2 验证服务状态
+### 5.2 验证服务状态（必须等待所有服务启动）
 
-访问以下 URL 确认服务正常：
+**检查清单**：
 
-| 服务 | URL | 预期结果 |
-|------|-----|---------|
-| Aspire Dashboard | http://localhost:18888 | 显示所有服务状态 |
-| Vue 前端 | http://localhost:5173 | 显示 DbOptimizer 首页 |
-| API 健康检查 | http://localhost:8669/health | 返回 `Healthy` |
-| API Swagger | http://localhost:8669/swagger | 显示 API 文档 |
-| pgAdmin | http://localhost:15050 | PostgreSQL 管理界面 |
-| phpMyAdmin | http://localhost:15051 | MySQL 管理界面 |
-| RedisInsight | http://localhost:15540 | Redis 管理界面 |
+1. **访问 Aspire Dashboard**: http://localhost:18888
+   - 查看 Resources 标签页
+   - 确认所有服务状态为绿色 "Running"
+
+2. **验证各服务端点**：
+   ```bash
+   # API 健康检查
+   curl http://localhost:8669/health
+   # 预期输出: Healthy
+
+   # 前端首页
+   curl http://localhost:5173
+   # 预期输出: HTML 内容
+
+   # Swagger 文档
+   curl http://localhost:8669/swagger/index.html
+   # 预期输出: HTML 内容
+   ```
+
+3. **数据库管理工具**：
+   - pgAdmin: http://localhost:15050
+   - phpMyAdmin: http://localhost:15051
+   - RedisInsight: http://localhost:15540
+
+**如果服务未启动**：
+- 等待更长时间（首次启动需要拉取 Docker 镜像）
+- 检查 Docker Desktop 是否运行
+- 查看 Aspire Dashboard 的 Console Logs 标签页排查错误
 
 ---
 
