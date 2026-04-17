@@ -56,6 +56,13 @@ public sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext> 
         entity.Property(x => x.WorkflowType).HasColumnName("workflow_type").HasMaxLength(50);
         entity.Property(x => x.Status).HasColumnName("status").HasMaxLength(20);
         entity.Property(x => x.State).HasColumnName("state").HasColumnType("jsonb").HasDefaultValue("{}");
+        entity.Property(x => x.EngineType).HasColumnName("engine_type").HasMaxLength(50).HasDefaultValue("maf");
+        entity.Property(x => x.EngineRunId).HasColumnName("engine_run_id").HasMaxLength(100);
+        entity.Property(x => x.EngineCheckpointRef).HasColumnName("engine_checkpoint_ref").HasMaxLength(200);
+        entity.Property(x => x.EngineState).HasColumnName("engine_state").HasColumnType("jsonb");
+        entity.Property(x => x.ResultType).HasColumnName("result_type").HasMaxLength(100);
+        entity.Property(x => x.SourceType).HasColumnName("source_type").HasMaxLength(50).HasDefaultValue("manual");
+        entity.Property(x => x.SourceRefId).HasColumnName("source_ref_id");
         entity.Property(x => x.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("NOW()");
         entity.Property(x => x.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("NOW()");
         entity.Property(x => x.CompletedAt).HasColumnName("completed_at");
@@ -64,6 +71,7 @@ public sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext> 
         entity.HasIndex(x => x.Status).HasDatabaseName("idx_workflow_sessions_status");
         entity.HasIndex(x => x.CreatedAt).HasDatabaseName("idx_workflow_sessions_created_at_desc").IsDescending(true);
         entity.HasIndex(x => x.WorkflowType).HasDatabaseName("idx_workflow_sessions_workflow_type");
+        entity.HasIndex(x => x.ResultType).HasDatabaseName("idx_workflow_sessions_result_type");
     }
 
     private static void ConfigureAgentExecutions(ModelBuilder modelBuilder)
@@ -187,6 +195,9 @@ public sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext> 
             .HasDefaultValueSql("gen_random_uuid()");
         entity.Property(x => x.SessionId).HasColumnName("session_id");
         entity.Property(x => x.TaskType).HasColumnName("task_type").HasMaxLength(50);
+        entity.Property(x => x.RequestId).HasColumnName("request_id").HasMaxLength(100);
+        entity.Property(x => x.EngineRunId).HasColumnName("engine_run_id").HasMaxLength(100);
+        entity.Property(x => x.EngineCheckpointRef).HasColumnName("engine_checkpoint_ref").HasMaxLength(200);
         entity.Property(x => x.Recommendations).HasColumnName("recommendations").HasColumnType("jsonb");
         entity.Property(x => x.Status).HasColumnName("status").HasMaxLength(20);
         entity.Property(x => x.ReviewerComment).HasColumnName("reviewer_comment");
@@ -198,6 +209,7 @@ public sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext> 
         entity.HasIndex(x => x.Status).HasDatabaseName("idx_review_tasks_status");
         entity.HasIndex(x => x.TaskType).HasDatabaseName("idx_review_tasks_task_type");
         entity.HasIndex(x => x.CreatedAt).HasDatabaseName("idx_review_tasks_created_at_desc").IsDescending(true);
+        entity.HasIndex(x => x.RequestId).HasDatabaseName("idx_review_tasks_request_id");
 
         entity.HasOne(x => x.Session)
             .WithMany(x => x.ReviewTasks)
@@ -284,11 +296,13 @@ public sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext> 
         entity.Property(x => x.LastSeenAt).HasColumnName("last_seen_at");
         entity.Property(x => x.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("NOW()");
         entity.Property(x => x.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("NOW()");
+        entity.Property(x => x.LatestAnalysisSessionId).HasColumnName("latest_analysis_session_id");
 
         entity.HasIndex(x => new { x.QueryHash, x.DatabaseId }).HasDatabaseName("idx_slow_queries_hash_db");
         entity.HasIndex(x => x.LastSeenAt).HasDatabaseName("idx_slow_queries_last_seen_desc").IsDescending(true);
         entity.HasIndex(x => x.DatabaseId).HasDatabaseName("idx_slow_queries_database_id");
         entity.HasIndex(x => x.AvgExecutionTime).HasDatabaseName("idx_slow_queries_avg_time_desc").IsDescending(true);
+        entity.HasIndex(x => x.LatestAnalysisSessionId).HasDatabaseName("idx_slow_queries_latest_analysis_session_id");
     }
 }
 
@@ -301,6 +315,20 @@ public sealed class WorkflowSessionEntity
     public string Status { get; set; } = string.Empty;
 
     public string State { get; set; } = "{}";
+
+    public string EngineType { get; set; } = "maf";
+
+    public string? EngineRunId { get; set; }
+
+    public string? EngineCheckpointRef { get; set; }
+
+    public string? EngineState { get; set; }
+
+    public string? ResultType { get; set; }
+
+    public string SourceType { get; set; } = "manual";
+
+    public Guid? SourceRefId { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
 
@@ -419,6 +447,12 @@ public sealed class ReviewTaskEntity
 
     public string TaskType { get; set; } = string.Empty;
 
+    public string RequestId { get; set; } = string.Empty;
+
+    public string? EngineRunId { get; set; }
+
+    public string? EngineCheckpointRef { get; set; }
+
     public string Recommendations { get; set; } = "{}";
 
     public string Status { get; set; } = string.Empty;
@@ -495,4 +529,5 @@ public sealed class SlowQueryEntity
     public DateTimeOffset LastSeenAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+    public Guid? LatestAnalysisSessionId { get; set; }
 }

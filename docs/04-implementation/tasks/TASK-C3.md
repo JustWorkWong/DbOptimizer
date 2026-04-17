@@ -10,6 +10,7 @@
 - TASK-A2
 - TASK-C1
 - TASK-C2
+- TASK-D1
 
 ## Read First
 
@@ -25,6 +26,9 @@
 4. `src/DbOptimizer.Infrastructure/Workflows/Events/MafWorkflowEventAdapter.cs`
 5. `src/DbOptimizer.Infrastructure/Workflows/Events/IWorkflowProgressCalculator.cs`
 6. `src/DbOptimizer.Infrastructure/Workflows/Events/WorkflowProgressCalculator.cs`
+7. `src/DbOptimizer.Infrastructure/Workflows/Monitoring/ITokenUsageRecorder.cs`
+   - `Task RecordAsync(Guid sessionId, string executorName, int promptTokens, int completionTokens, CancellationToken cancellationToken = default);`
+8. `src/DbOptimizer.Infrastructure/Workflows/Monitoring/TokenUsageRecorder.cs`
 
 ## Files To Modify
 
@@ -36,9 +40,11 @@
 
 1. 建立 MAF event -> business event 的适配器。
 2. 建立 workflow progress calculator。
-3. 建立 projection writer，更新 `workflow_sessions.state/status/result_type`。
-4. 更新 history/replay 查询使用新投影结果。
-5. 更新 SSE snapshot 和 event 输出。
+3. 建立 Token usage recorder（记录每个 executor 的 token 消耗）。
+4. 建立 projection writer，更新 `workflow_sessions.state/status/result_type`。
+5. 更新 history/replay 查询使用新投影结果。
+6. 更新 SSE snapshot 和 event 输出。
+7. 注意：先实现 SQL workflow 投影，D1 完成后补配置 workflow 投影。
 
 ## Verification
 
