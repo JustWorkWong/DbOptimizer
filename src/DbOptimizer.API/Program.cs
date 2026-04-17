@@ -135,9 +135,12 @@ builder.Services.AddSingleton(slowQueryCollectionOptions);
 // MCP 服务注册
 var mcpOptions = builder.Configuration.GetSection("DbOptimizer:Mcp").Get<DbOptimizer.Infrastructure.Mcp.McpOptions>()
     ?? throw new InvalidOperationException("Missing required configuration section: DbOptimizer:Mcp");
+var mySqlConnectionString = builder.Configuration.GetConnectionString("dboptimizer-mysql")
+    ?? builder.Configuration.GetConnectionString("mysql")
+    ?? throw new InvalidOperationException("Missing MySQL connection string");
 var mcpFallbackOptions = new DbOptimizer.Infrastructure.Mcp.McpFallbackOptions
 {
-    MySqlConnectionString = builder.Configuration.GetConnectionString("mysql") ?? throw new InvalidOperationException("Missing MySQL connection string"),
+    MySqlConnectionString = mySqlConnectionString,
     PostgreSqlConnectionString = postgreSqlConnectionString,
     TimeoutSeconds = mcpOptions.TimeoutSeconds
 };
