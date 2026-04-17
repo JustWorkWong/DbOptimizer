@@ -74,28 +74,33 @@ internal static class WorkflowEventsApiRouteBuilderExtensions
                 await WriteEventAsync(response, backlogEvent, cancellationToken);
             }
 
-            using var heartbeatTimer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+            var lastHeartbeat = DateTime.UtcNow;
+            var heartbeatInterval = TimeSpan.FromSeconds(30);
+
             while (!cancellationToken.IsCancellationRequested)
             {
-                var waitForEventTask = subscription.Reader.WaitToReadAsync(cancellationToken).AsTask();
-                var heartbeatTask = heartbeatTimer.WaitForNextTickAsync(cancellationToken).AsTask();
-                var completedTask = await Task.WhenAny(waitForEventTask, heartbeatTask);
+                var timeUntilHeartbeat = heartbeatInterval - (DateTime.UtcNow - lastHeartbeat);
+                var timeout = timeUntilHeartbeat > TimeSpan.Zero ? timeUntilHeartbeat : TimeSpan.FromMilliseconds(1);
 
-                if (completedTask == heartbeatTask)
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(timeout);
+
+                try
                 {
-                    await heartbeatTask;
+                    var hasData = await subscription.Reader.WaitToReadAsync(timeoutCts.Token);
+                    if (hasData)
+                    {
+                        while (subscription.Reader.TryRead(out var workflowEvent))
+                        {
+                            await WriteEventAsync(response, workflowEvent, cancellationToken);
+                        }
+                    }
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // Timeout reached, send heartbeat
                     await WriteHeartbeatAsync(response, cancellationToken);
-                    continue;
-                }
-
-                if (!await waitForEventTask)
-                {
-                    break;
-                }
-
-                while (subscription.Reader.TryRead(out var workflowEvent))
-                {
-                    await WriteEventAsync(response, workflowEvent, cancellationToken);
+                    lastHeartbeat = DateTime.UtcNow;
                 }
             }
         }
