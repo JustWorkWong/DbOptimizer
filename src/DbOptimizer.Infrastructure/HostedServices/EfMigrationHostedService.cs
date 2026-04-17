@@ -12,7 +12,7 @@ namespace DbOptimizer.Infrastructure.DatabaseMigrations;
  * 2) 迁移完成后再开放健康就绪
  * 3) 失败时阻断启动并记录错误摘要
  * ========================= */
-internal sealed class EfMigrationHostedService(
+public sealed class EfMigrationHostedService(
     IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
     MigrationReadinessState readinessState,
     ILogger<EfMigrationHostedService> logger) : IHostedService

@@ -12,7 +12,7 @@ using Npgsql;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal interface IExecutionPlanProvider
+public interface IExecutionPlanProvider
 {
     Task<ExecutionPlanInvocationResult> ExplainAsync(
         DatabaseOptimizationEngine databaseEngine,
@@ -25,7 +25,7 @@ internal interface IExecutionPlanProvider
  * 先走 MCP explain，失败后按配置决定是否降级为数据库直连 explain。
  * 这里优先保证 M3-03 功能闭环，后续如果要和 AgentRuntime 共用基础设施可以再抽公共层。
  * ========================= */
-internal sealed class ExecutionPlanProvider(
+public sealed class ExecutionPlanProvider(
     IConfiguration configuration,
     ExecutionPlanOptions executionPlanOptions,
     ILogger<ExecutionPlanProvider> logger) : IExecutionPlanProvider

@@ -9,7 +9,7 @@ using ModelContextProtocol.Protocol;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal interface IConfigCollectionProvider
+public interface IConfigCollectionProvider
 {
     Task<DbConfigSnapshot> CollectConfigAsync(
         DatabaseOptimizationEngine databaseEngine,
@@ -25,7 +25,7 @@ internal interface IConfigCollectionProvider
  * 3) PostgreSQL: SELECT * FROM pg_settings + pg_stat_database
  * 4) 错误处理：MCP 超时/失败时标记 UsedFallback
  * ========================= */
-internal sealed class ConfigCollectionProvider(
+public sealed class ConfigCollectionProvider(
     IConfiguration configuration,
     ConfigCollectionOptions configCollectionOptions,
     ILogger<ConfigCollectionProvider> logger) : IConfigCollectionProvider

@@ -7,7 +7,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
  * 配置分析执行器
  * 从 WorkflowContext 读取配置快照，调用规则引擎生成优化建议
  * ========================= */
-internal sealed class ConfigAnalyzerExecutor(
+public sealed class ConfigAnalyzerExecutor(
     IConfigRuleEngine ruleEngine,
     ILogger<ConfigAnalyzerExecutor> logger) : IWorkflowExecutor
 {

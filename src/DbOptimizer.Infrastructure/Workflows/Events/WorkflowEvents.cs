@@ -6,7 +6,7 @@ using System.Threading.Channels;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal enum WorkflowEventType
+public enum WorkflowEventType
 {
     WorkflowStarted,
     ExecutorStarted,
@@ -19,7 +19,7 @@ internal enum WorkflowEventType
     CheckpointSaved
 }
 
-internal sealed record WorkflowEventMessage(
+public sealed record WorkflowEventMessage(
     WorkflowEventType EventType,
     Guid SessionId,
     string WorkflowType,
@@ -27,7 +27,7 @@ internal sealed record WorkflowEventMessage(
     object Payload,
     long? Sequence = null);
 
-internal sealed record WorkflowEventRecord(
+public sealed record WorkflowEventRecord(
     long Sequence,
     WorkflowEventType EventType,
     Guid SessionId,
@@ -35,17 +35,17 @@ internal sealed record WorkflowEventRecord(
     DateTimeOffset Timestamp,
     JsonElement Payload);
 
-internal sealed record WorkflowEventSubscription(
+public sealed record WorkflowEventSubscription(
     IReadOnlyList<WorkflowEventRecord> Backlog,
     ChannelReader<WorkflowEventRecord> Reader,
     Action Dispose);
 
-internal interface IWorkflowEventPublisher
+public interface IWorkflowEventPublisher
 {
     Task PublishAsync(WorkflowEventMessage workflowEvent, CancellationToken cancellationToken = default);
 }
 
-internal interface IWorkflowEventQueryService
+public interface IWorkflowEventQueryService
 {
     IReadOnlyList<WorkflowEventRecord> GetEvents(Guid sessionId, long afterSequence = 0, int limit = 200);
 
@@ -59,7 +59,7 @@ internal interface IWorkflowEventQueryService
  * 2) 为 SSE 与回放提供进程内事件缓冲与订阅能力
  * 3) 保留结构化日志，便于联调和排障
  * ========================= */
-internal sealed class WorkflowEventHub(ILogger<WorkflowEventHub> logger) : IWorkflowEventPublisher, IWorkflowEventQueryService
+public sealed class WorkflowEventHub(ILogger<WorkflowEventHub> logger) : IWorkflowEventPublisher, IWorkflowEventQueryService
 {
     private const int MaxBufferedEventsPerSession = 512;
     private static readonly TimeSpan SessionRetention = TimeSpan.FromHours(1);

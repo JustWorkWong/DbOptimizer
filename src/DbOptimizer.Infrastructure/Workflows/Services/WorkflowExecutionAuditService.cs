@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal interface IWorkflowExecutionAuditService
+public interface IWorkflowExecutionAuditService
 {
     Task<Guid?> StartExecutionAsync(
         WorkflowContext context,
@@ -43,7 +43,7 @@ internal interface IWorkflowExecutionAuditService
         CancellationToken cancellationToken = default);
 }
 
-internal sealed class WorkflowExecutionAuditService(
+public sealed class WorkflowExecutionAuditService(
     IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
     ILogger<WorkflowExecutionAuditService> logger) : IWorkflowExecutionAuditService
 {

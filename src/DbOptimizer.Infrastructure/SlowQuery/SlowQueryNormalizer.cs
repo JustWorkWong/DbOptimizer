@@ -14,7 +14,7 @@ namespace DbOptimizer.Infrastructure.SlowQuery;
  * 3) 提取表名、操作类型
  * 4) 复用 LightweightSqlParser 进行解析
  * ========================= */
-internal sealed class SlowQueryNormalizer(ISqlParser sqlParser) : ISlowQueryNormalizer
+public sealed class SlowQueryNormalizer(ISqlParser sqlParser) : ISlowQueryNormalizer
 {
     private static readonly Regex NumberLiteralRegex = new(@"\b\d+\b", RegexOptions.Compiled);
     private static readonly Regex StringLiteralRegex = new(@"'[^']*'", RegexOptions.Compiled);
@@ -58,7 +58,7 @@ internal sealed class SlowQueryNormalizer(ISqlParser sqlParser) : ISlowQueryNorm
     }
 }
 
-internal interface ISlowQueryNormalizer
+public interface ISlowQueryNormalizer
 {
     NormalizedSlowQuery Normalize(RawSlowQuery raw, string databaseId, string databaseType);
 }

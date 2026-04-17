@@ -9,7 +9,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
  * 2) 读取目标表已有索引，避免输出明显重复的建议
  * 3) 生成可解释、可落地的 IndexRecommendation 列表并写回上下文
  * ========================= */
-internal sealed class IndexAdvisorExecutor(
+public sealed class IndexAdvisorExecutor(
     ITableIndexMetadataProvider tableIndexMetadataProvider,
     ITableIndexMetadataAnalyzer tableIndexMetadataAnalyzer,
     IIndexRecommendationGenerator indexRecommendationGenerator,

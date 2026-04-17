@@ -9,7 +9,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
  * 2) 将 ReviewId / ReviewStatus 写回上下文
  * 3) 将 Workflow 切换到 WaitingForReview，等待后续用户动作驱动恢复
  * ========================= */
-internal sealed class ConfigReviewExecutor(
+public sealed class ConfigReviewExecutor(
     IConfigReviewTaskService configReviewTaskService,
     ILogger<ConfigReviewExecutor> logger) : IWorkflowExecutor
 {

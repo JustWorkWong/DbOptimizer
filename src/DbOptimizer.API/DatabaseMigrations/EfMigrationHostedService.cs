@@ -1,4 +1,4 @@
-using DbOptimizer.API.Persistence;
+using DbOptimizer.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.API.DatabaseMigrations;

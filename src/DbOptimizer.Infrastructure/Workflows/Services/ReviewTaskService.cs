@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal interface IReviewTaskService
+public interface IReviewTaskService
 {
     Task<Guid> CreateAsync(
         Guid sessionId,
@@ -14,7 +14,7 @@ internal interface IReviewTaskService
         CancellationToken cancellationToken = default);
 }
 
-internal interface IConfigReviewTaskService
+public interface IConfigReviewTaskService
 {
     Task<Guid> CreateAsync(
         Guid sessionId,
@@ -26,7 +26,7 @@ internal interface IConfigReviewTaskService
  * 审阅任务服务
  * 当前先负责把待审内容持久化到 review_tasks，后续 Review API 直接消费这张表。
  * ========================= */
-internal sealed class ReviewTaskService(
+public sealed class ReviewTaskService(
     IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
     ILogger<ReviewTaskService> logger) : IReviewTaskService
 {
@@ -64,7 +64,7 @@ internal sealed class ReviewTaskService(
 /* =========================
  * 配置优化审阅任务服务
  * ========================= */
-internal sealed class ConfigReviewTaskService(
+public sealed class ConfigReviewTaskService(
     IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
     ILogger<ConfigReviewTaskService> logger) : IConfigReviewTaskService
 {

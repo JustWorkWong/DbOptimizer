@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using DbOptimizer.API.Checkpointing;
+using DbOptimizer.Infrastructure.Checkpointing;
 
 namespace DbOptimizer.API.Api;
 

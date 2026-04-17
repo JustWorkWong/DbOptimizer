@@ -9,7 +9,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
  * 2) 输出最终可审阅的 ConfigOptimizationReport
  * 3) 维护简洁的 summary、confidence 与统计信息
  * ========================= */
-internal sealed class ConfigCoordinatorExecutor(ILogger<ConfigCoordinatorExecutor> logger) : IWorkflowExecutor
+public sealed class ConfigCoordinatorExecutor(ILogger<ConfigCoordinatorExecutor> logger) : IWorkflowExecutor
 {
     public string Name => "ConfigCoordinatorExecutor";
 

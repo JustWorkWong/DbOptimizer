@@ -9,7 +9,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
  * 2) 通过 MCP explain 获取执行计划，失败时按配置直连降级
  * 3) 抽取最小可用的性能问题和指标，写回 ExecutionPlan
  * ========================= */
-internal sealed class ExecutionPlanExecutor(
+public sealed class ExecutionPlanExecutor(
     IExecutionPlanProvider executionPlanProvider,
     IExecutionPlanAnalyzer executionPlanAnalyzer,
     ILogger<ExecutionPlanExecutor> logger) : IWorkflowExecutor

@@ -12,7 +12,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
  * 3) 写入 WorkflowContext: ConfigSnapshot
  * 4) 记录收集的参数数量、耗时
  * ========================= */
-internal sealed class ConfigCollectorExecutor(
+public sealed class ConfigCollectorExecutor(
     IConfigCollectionProvider configCollectionProvider,
     ILogger<ConfigCollectorExecutor> logger) : IWorkflowExecutor
 {

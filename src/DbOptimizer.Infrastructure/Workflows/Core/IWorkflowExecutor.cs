@@ -3,14 +3,14 @@ using DbOptimizer.Infrastructure.Checkpointing;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal interface IWorkflowExecutor
+public interface IWorkflowExecutor
 {
     string Name { get; }
 
     Task<WorkflowExecutorResult> ExecuteAsync(WorkflowContext context, CancellationToken cancellationToken = default);
 }
 
-internal sealed record WorkflowExecutorResult(
+public sealed record WorkflowExecutorResult(
     bool IsSuccess,
     WorkflowCheckpointStatus NextStatus,
     object? Output,
@@ -37,7 +37,7 @@ internal sealed record WorkflowExecutorResult(
     }
 }
 
-internal sealed record WorkflowRunResult(
+public sealed record WorkflowRunResult(
     Guid SessionId,
     WorkflowCheckpointStatus Status,
     string CurrentExecutor,

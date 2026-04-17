@@ -1,7 +1,7 @@
 using DbOptimizer.Core.Models;
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal sealed class WorkflowRuntimeOptions
+public sealed class WorkflowRuntimeOptions
 {
     public const string SectionName = "DbOptimizer:Workflow";
 

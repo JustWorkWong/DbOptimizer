@@ -1,9 +1,9 @@
-using DbOptimizer.API.Checkpointing;
 using DbOptimizer.API.Api;
 using DbOptimizer.API.DatabaseMigrations;
-using DbOptimizer.API.Persistence;
-using DbOptimizer.API.Workflows;
-using DbOptimizer.API.SlowQuery;
+using DbOptimizer.Infrastructure.Checkpointing;
+using DbOptimizer.Infrastructure.Persistence;
+using DbOptimizer.Infrastructure.Workflows;
+using DbOptimizer.Infrastructure.SlowQuery;
 using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
 using Microsoft.OpenApi.Models;

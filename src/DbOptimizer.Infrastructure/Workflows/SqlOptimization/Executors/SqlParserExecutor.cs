@@ -9,7 +9,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
  * 2) 调用轻量解析器提取表/字段/JOIN/WHERE 等关键信息
  * 3) 将结构化结果写回 ParsedSql，供后续执行器继续使用
  * ========================= */
-internal sealed class SqlParserExecutor(
+public sealed class SqlParserExecutor(
     ISqlParser sqlParser,
     ILogger<SqlParserExecutor> logger) : IWorkflowExecutor
 {

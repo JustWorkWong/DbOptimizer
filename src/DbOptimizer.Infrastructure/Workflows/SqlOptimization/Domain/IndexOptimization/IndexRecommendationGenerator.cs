@@ -1,7 +1,7 @@
 using DbOptimizer.Core.Models;
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal interface IIndexRecommendationGenerator
+public interface IIndexRecommendationGenerator
 {
     IReadOnlyList<IndexRecommendation> Generate(
         DatabaseOptimizationEngine databaseEngine,
@@ -18,7 +18,7 @@ internal interface IIndexRecommendationGenerator
  * - ORDER BY / GROUP BY 列
  * 同时尽量避开“已有索引已覆盖”的重复建议。
  * ========================= */
-internal sealed class IndexRecommendationGenerator : IIndexRecommendationGenerator
+public sealed class IndexRecommendationGenerator : IIndexRecommendationGenerator
 {
     public IReadOnlyList<IndexRecommendation> Generate(
         DatabaseOptimizationEngine databaseEngine,

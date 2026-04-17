@@ -11,7 +11,7 @@ namespace DbOptimizer.Infrastructure.SlowQuery;
  * 2) 去重逻辑：根据 QueryHash + DatabaseId + 时间窗口（1 小时）
  * 3) 更新 ExecutionCount 和 AvgExecutionTime
  * ========================= */
-internal sealed class SlowQueryRepository(IDbContextFactory<DbOptimizerDbContext> dbContextFactory) : ISlowQueryRepository
+public sealed class SlowQueryRepository(IDbContextFactory<DbOptimizerDbContext> dbContextFactory) : ISlowQueryRepository
 {
     private static readonly TimeSpan DeduplicationWindow = TimeSpan.FromHours(1);
 
@@ -85,7 +85,7 @@ internal sealed class SlowQueryRepository(IDbContextFactory<DbOptimizerDbContext
     }
 }
 
-internal interface ISlowQueryRepository
+public interface ISlowQueryRepository
 {
     Task SaveAsync(NormalizedSlowQuery normalized, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SlowQueryEntity>> GetRecentSlowQueriesAsync(string databaseId, int limit = 100, CancellationToken cancellationToken = default);

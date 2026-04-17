@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-internal static class WorkflowEventPayloadFactory
+public static class WorkflowEventPayloadFactory
 {
     public static object BuildExecutorStartedPayload(
         WorkflowContext context,
