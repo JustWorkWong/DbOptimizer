@@ -227,6 +227,7 @@ builder.Services.AddSingleton<ISlowQueryCollector, SlowQueryCollector>();
 builder.Services.AddSingleton<ISlowQueryNormalizer, SlowQueryNormalizer>();
 builder.Services.AddSingleton<ISlowQueryRepository, SlowQueryRepository>();
 builder.Services.AddSingleton<ISlowQueryWorkflowSubmissionService, SlowQueryWorkflowSubmissionService>();
+builder.Services.AddSingleton<ISlowQueryDashboardQueryService, SlowQueryDashboardQueryService>();
 builder.Services.AddSingleton<MigrationReadinessState>();
 builder.Services.AddHostedService<EfMigrationHostedService>();
 builder.Services.AddHostedService<RunningWorkflowRecoveryHostedService>();
@@ -295,6 +296,7 @@ app.MapGet("/debug/connections", (IConfiguration config) =>
 app.MapWorkflowApi();
 app.MapReviewApi();
 app.MapDashboardAndHistoryApi();
+app.MapSlowQueryApi();
 app.MapWorkflowEventsApi();
 
 app.Run();
