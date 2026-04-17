@@ -16,6 +16,9 @@ import {
   getSlowQueryDetail,
   getSlowQueryTrends,
   getSlowQueryAlerts,
+  listPromptVersions,
+  createPromptVersion,
+  activatePromptVersion,
   type DashboardStats,
   type HistoryDetail,
   type HistoryListItem,
@@ -32,6 +35,8 @@ import {
   type SlowQueryDetail,
   type SlowQueryTrendItem,
   type SlowQueryAlert,
+  type PromptVersionDto,
+  type CreatePromptVersionRequest,
 } from './api'
 import DashboardStatsPanel from './components/dashboard/DashboardStatsPanel.vue'
 import SlowQueryTrendChart from './components/dashboard/SlowQueryTrendChart.vue'
@@ -40,7 +45,7 @@ import SlowQueryAlertList from './components/dashboard/SlowQueryAlertList.vue'
 const stats = ref<DashboardStats | null>(null)
 const reviews = ref<ReviewListItem[]>([])
 const selectedTaskId = ref('')
-const activeView = ref<'dashboard' | 'sql' | 'db-config' | 'review' | 'history' | 'replay' | 'slow-query'>('dashboard')
+const activeView = ref<'dashboard' | 'sql' | 'db-config' | 'review' | 'history' | 'replay' | 'slow-query' | 'prompt-management'>('dashboard')
 const dashboardStats = ref<DashboardStats | null>(null)
 const slowQueryTrend = ref<SlowQueryTrendItem[]>([])
 const slowQueryAlerts = ref<SlowQueryAlert[]>([])
@@ -92,6 +97,12 @@ const slowQueryPage = ref(1)
 const slowQueryPageSize = ref(20)
 const slowQueryTotal = ref(0)
 const loadingSlowQueries = ref(false)
+const promptVersions = ref<PromptVersionDto[]>([])
+const promptVersionPage = ref(1)
+const promptVersionPageSize = ref(20)
+const promptVersionTotal = ref(0)
+const promptVersionAgentFilter = ref('')
+const loadingPromptVersions = ref(false)
 
 let eventSource: EventSource | null = null
 let replayTimer: number | null = null
@@ -359,6 +370,43 @@ async function selectSlowQuery(queryId: string) {
   selectedSlowQueryId.value = queryId
   try {
     slowQueryDetail.value = await getSlowQueryDetail(queryId)
+  } catch (error) {
+    errorMessage.value = getErrorText(error)
+  }
+}
+
+async function loadPromptVersions() {
+  loadingPromptVersions.value = true
+  try {
+    const response = await listPromptVersions(
+      promptVersionAgentFilter.value || undefined,
+      promptVersionPage.value,
+      promptVersionPageSize.value
+    )
+    promptVersions.value = response.items
+    promptVersionTotal.value = response.total
+  } catch (error) {
+    errorMessage.value = getErrorText(error)
+  } finally {
+    loadingPromptVersions.value = false
+  }
+}
+
+async function handleCreatePromptVersion(request: CreatePromptVersionRequest) {
+  try {
+    await createPromptVersion(request)
+    successMessage.value = '新版本已创建'
+    await loadPromptVersions()
+  } catch (error) {
+    errorMessage.value = getErrorText(error)
+  }
+}
+
+async function handleActivatePromptVersion(versionId: string) {
+  try {
+    await activatePromptVersion(versionId)
+    successMessage.value = '版本已激活'
+    await loadPromptVersions()
   } catch (error) {
     errorMessage.value = getErrorText(error)
   }
@@ -1123,6 +1171,9 @@ function getErrorText(error: unknown) {
       </button>
       <button type="button" class="view-tab" :class="{ active: activeView === 'slow-query' }" @click="activeView = 'slow-query'">
         慢查询
+      </button>
+      <button type="button" class="view-tab" :class="{ active: activeView === 'prompt-management' }" @click="activeView = 'prompt-management'">
+        Prompt 管理
       </button>
     </nav>
 
@@ -2160,6 +2211,113 @@ function getErrorText(error: unknown) {
                 <small>{{ formatDateTime(history.analyzedAt) }}</small>
               </article>
             </div>
+          </div>
+        </div>
+      </main>
+    </section>
+
+    <section v-else-if="activeView === 'prompt-management'" class="workspace-grid history-grid">
+      <aside class="panel review-queue">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Prompt Versions</p>
+            <h2>Prompt 版本列表</h2>
+          </div>
+          <span class="panel-kicker">{{ promptVersionTotal }} 个版本</span>
+        </div>
+
+        <div class="dashboard-filters">
+          <label class="field-label">
+            Agent 筛选
+            <input v-model="promptVersionAgentFilter" type="text" placeholder="输入 Agent 名称" @change="loadPromptVersions" />
+          </label>
+          <button class="primary-button" type="button" @click="loadPromptVersions">刷新</button>
+        </div>
+
+        <div v-if="loadingPromptVersions" class="empty-state">加载中...</div>
+
+        <div v-else-if="promptVersions.length === 0" class="empty-state">
+          暂无 Prompt 版本
+        </div>
+
+        <div v-else class="review-list">
+          <article
+            v-for="version in promptVersions"
+            :key="version.versionId"
+            class="review-card"
+          >
+            <div class="review-top">
+              <strong>{{ version.agentName }}</strong>
+              <span class="badge" :class="version.isActive ? 'badge-success' : 'badge-muted'">
+                v{{ version.versionNumber }} {{ version.isActive ? '(激活)' : '' }}
+              </span>
+            </div>
+            <p class="sql-preview">{{ version.promptTemplate.substring(0, 80) }}...</p>
+            <div class="review-meta">
+              <small>{{ formatDateTime(version.createdAt) }}</small>
+              <small v-if="version.createdBy">by {{ version.createdBy }}</small>
+            </div>
+            <div class="review-actions">
+              <button
+                v-if="!version.isActive"
+                class="ghost-button"
+                type="button"
+                @click="handleActivatePromptVersion(version.versionId)"
+              >
+                激活
+              </button>
+            </div>
+          </article>
+        </div>
+
+        <div v-if="promptVersionTotal > promptVersionPageSize" class="pagination-row">
+          <button
+            class="ghost-button"
+            type="button"
+            :disabled="promptVersionPage === 1"
+            @click="promptVersionPage--; loadPromptVersions()"
+          >
+            上一页
+          </button>
+          <span>{{ promptVersionPage }} / {{ Math.ceil(promptVersionTotal / promptVersionPageSize) }}</span>
+          <button
+            class="ghost-button"
+            type="button"
+            :disabled="promptVersionPage >= Math.ceil(promptVersionTotal / promptVersionPageSize)"
+            @click="promptVersionPage++; loadPromptVersions()"
+          >
+            下一页
+          </button>
+        </div>
+      </aside>
+
+      <main class="panel review-detail">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Management</p>
+            <h2>Prompt 版本管理</h2>
+          </div>
+        </div>
+
+        <div class="detail-content">
+          <div class="summary-card">
+            <h3>创建新版本</h3>
+            <form @submit.prevent="handleCreatePromptVersion({
+              agentName: promptVersionAgentFilter || 'DefaultAgent',
+              promptTemplate: 'New prompt template',
+              createdBy: 'admin'
+            })">
+              <label class="field-label">
+                Agent 名称
+                <input v-model="promptVersionAgentFilter" type="text" required />
+              </label>
+              <button class="primary-button" type="submit">创建版本</button>
+            </form>
+          </div>
+
+          <div class="summary-card">
+            <h3>版本回滚</h3>
+            <p>从左侧列表选择版本并激活，或使用下方表单回滚到指定版本号。</p>
           </div>
         </div>
       </main>

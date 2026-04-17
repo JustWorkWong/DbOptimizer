@@ -6,6 +6,7 @@ using DbOptimizer.Infrastructure.Workflows;
 using DbOptimizer.Infrastructure.SlowQuery;
 using DbOptimizer.Infrastructure.Maf.Runtime;
 using DbOptimizer.Infrastructure.Mcp;
+using DbOptimizer.Infrastructure.Prompts;
 using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
 using Microsoft.OpenApi.Models;
@@ -189,6 +190,7 @@ builder.Services.AddSingleton<IConfigRule, MySqlQueryCacheRule>();
 builder.Services.AddSingleton<IConfigRuleEngine, ConfigRuleEngine>();
 builder.Services.AddSingleton<IReviewTaskService, ReviewTaskService>();
 builder.Services.AddSingleton<IConfigReviewTaskService, ConfigReviewTaskService>();
+builder.Services.AddSingleton<IPromptVersionService, PromptVersionService>();
 builder.Services.AddSingleton<IWorkflowExecutor, SqlParserExecutor>();
 builder.Services.AddSingleton<IWorkflowExecutor, ExecutionPlanExecutor>();
 builder.Services.AddSingleton<IWorkflowExecutor, IndexAdvisorExecutor>();
@@ -298,6 +300,7 @@ app.MapReviewApi();
 app.MapDashboardAndHistoryApi();
 app.MapSlowQueryApi();
 app.MapWorkflowEventsApi();
+app.MapPromptVersionApi();
 
 app.Run();
 
