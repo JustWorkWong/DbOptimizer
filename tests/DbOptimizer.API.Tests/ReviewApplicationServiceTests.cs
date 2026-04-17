@@ -1,8 +1,8 @@
 using System.Text.Json;
 using DbOptimizer.API.Api;
-using DbOptimizer.API.Checkpointing;
-using DbOptimizer.API.Persistence;
-using DbOptimizer.API.Workflows;
+using DbOptimizer.Infrastructure.Checkpointing;
+using DbOptimizer.Infrastructure.Persistence;
+using DbOptimizer.Infrastructure.Workflows;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
