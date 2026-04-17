@@ -13,11 +13,14 @@ namespace DbOptimizer.Infrastructure.SlowQuery;
  * 2) 配置：CollectionIntervalMinutes, EnabledDatabases
  * 3) 调用 SlowQueryCollector + SlowQueryNormalizer
  * 4) 保存到 slow_queries 表（通过 Repository）
+ * 5) 自动提交慢查询为 SQL 分析工作流
+ * 6) 回写 latest_analysis_session_id
  * ========================= */
 public sealed class SlowQueryCollectionService(
     ISlowQueryCollector collector,
     ISlowQueryNormalizer normalizer,
     ISlowQueryRepository repository,
+    ISlowQueryWorkflowSubmissionService workflowSubmissionService,
     SlowQueryCollectionOptions options,
     ILogger<SlowQueryCollectionService> logger) : BackgroundService
 {
@@ -95,7 +98,27 @@ public sealed class SlowQueryCollectionService(
                     databaseConfig.DatabaseId,
                     databaseConfig.DatabaseType);
 
-                await repository.SaveAsync(normalized, cancellationToken);
+                var savedEntity = await repository.SaveAsync(normalized, cancellationToken);
+
+                // 自动提交慢查询为 SQL 分析工作流
+                try
+                {
+                    var sessionId = await workflowSubmissionService.SubmitAsync(savedEntity, cancellationToken);
+
+                    // 回写 latest_analysis_session_id
+                    await repository.UpdateLatestAnalysisSessionAsync(
+                        savedEntity.QueryId,
+                        sessionId,
+                        cancellationToken);
+                }
+                catch (Exception workflowEx)
+                {
+                    logger.LogWarning(
+                        workflowEx,
+                        "慢查询工作流提交失败。QueryId={QueryId}, DatabaseId={DatabaseId}",
+                        savedEntity.QueryId,
+                        databaseConfig.DatabaseId);
+                }
             }
             catch (Exception ex)
             {
