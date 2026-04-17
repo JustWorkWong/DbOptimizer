@@ -55,10 +55,10 @@ public sealed class ConfigCollectorExecutor(
     private static bool TryResolveInput(
         WorkflowContext context,
         out string databaseId,
-        out DatabaseOptimizationEngine databaseEngine)
+        out DbOptimizer.Core.Models.DatabaseOptimizationEngine databaseEngine)
     {
         databaseId = string.Empty;
-        databaseEngine = DatabaseOptimizationEngine.Unknown;
+        databaseEngine = DbOptimizer.Core.Models.DatabaseOptimizationEngine.Unknown;
 
         if (!context.TryGet<string>(WorkflowContextKeys.DatabaseId, out var dbId) ||
             string.IsNullOrWhiteSpace(dbId))
@@ -75,11 +75,11 @@ public sealed class ConfigCollectorExecutor(
         databaseId = dbId;
         databaseEngine = dbType.ToLowerInvariant() switch
         {
-            "mysql" => DatabaseOptimizationEngine.MySql,
-            "postgresql" or "postgres" => DatabaseOptimizationEngine.PostgreSql,
-            _ => DatabaseOptimizationEngine.Unknown
+            "mysql" => DbOptimizer.Core.Models.DatabaseOptimizationEngine.MySql,
+            "postgresql" or "postgres" => DbOptimizer.Core.Models.DatabaseOptimizationEngine.PostgreSql,
+            _ => DbOptimizer.Core.Models.DatabaseOptimizationEngine.Unknown
         };
 
-        return databaseEngine != DatabaseOptimizationEngine.Unknown;
+        return databaseEngine != DbOptimizer.Core.Models.DatabaseOptimizationEngine.Unknown;
     }
 }
