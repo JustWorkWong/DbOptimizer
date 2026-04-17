@@ -84,7 +84,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("frontend-dev", policy =>
     {
         policy
-            .WithOrigins(corsOrigins)
+            .AllowAnyOrigin()
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -136,8 +136,7 @@ builder.Services.AddSingleton(slowQueryCollectionOptions);
 var mcpOptions = builder.Configuration.GetSection("DbOptimizer:Mcp").Get<DbOptimizer.Infrastructure.Mcp.McpOptions>()
     ?? throw new InvalidOperationException("Missing required configuration section: DbOptimizer:Mcp");
 var mySqlConnectionString = builder.Configuration.GetConnectionString("dboptimizer-mysql")
-    ?? builder.Configuration.GetConnectionString("mysql")
-    ?? throw new InvalidOperationException("Missing MySQL connection string");
+    ?? throw new InvalidOperationException("Missing MySQL connection string: ConnectionStrings:dboptimizer-mysql");
 var mcpFallbackOptions = new DbOptimizer.Infrastructure.Mcp.McpFallbackOptions
 {
     MySqlConnectionString = mySqlConnectionString,
