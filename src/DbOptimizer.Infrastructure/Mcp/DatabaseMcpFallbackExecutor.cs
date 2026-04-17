@@ -24,6 +24,11 @@ public interface IDatabaseMcpFallbackExecutor
  * 1) 在 MCP 超时或连接异常时，提供受配置控制的直连数据库兜底能力
  * 2) 仅覆盖当前任务要求的四类工具：query / describe / explain / show_indexes
  * 3) 所有降级结果统一序列化为文本，便于后续审计与展示复用
+ *
+ * 安全模型：
+ * - Query/Explain 工具接受原始 SQL（用于分析慢查询），但必须使用只读连接字符串
+ * - DescribeTable/ShowIndexes 对表名进行标识符转义，防止注入
+ * - 所有 SQL 执行前验证危险关键字（DROP/DELETE/UPDATE/INSERT/TRUNCATE/ALTER/CREATE）
  * ========================= */
 public sealed class DatabaseMcpFallbackExecutor(
     McpFallbackOptions fallbackOptions,
@@ -74,7 +79,7 @@ public sealed class DatabaseMcpFallbackExecutor(
         {
             McpToolKind.Query => await ExecuteReaderAsync(
                 connection,
-                RequireSql(arguments),
+                ValidateSqlSafety(RequireSql(arguments)),
                 command => command.CommandTimeout = mcpOptions.TimeoutSeconds,
                 cancellationToken),
             McpToolKind.DescribeTable => await ExecuteReaderAsync(
@@ -94,7 +99,7 @@ public sealed class DatabaseMcpFallbackExecutor(
                 cancellationToken),
             McpToolKind.Explain => await ExecuteReaderAsync(
                 connection,
-                $"EXPLAIN {RequireSql(arguments)}",
+                $"EXPLAIN {ValidateSqlSafety(RequireSql(arguments))}",
                 command => command.CommandTimeout = mcpOptions.TimeoutSeconds,
                 cancellationToken),
             McpToolKind.ShowIndexes => await ExecuteReaderAsync(
@@ -128,7 +133,7 @@ public sealed class DatabaseMcpFallbackExecutor(
         {
             McpToolKind.Query => await ExecuteReaderAsync(
                 connection,
-                RequireSql(arguments),
+                ValidateSqlSafety(RequireSql(arguments)),
                 command => command.CommandTimeout = mcpOptions.TimeoutSeconds,
                 cancellationToken),
             McpToolKind.DescribeTable => await ExecuteReaderAsync(
@@ -148,7 +153,7 @@ public sealed class DatabaseMcpFallbackExecutor(
                 cancellationToken),
             McpToolKind.Explain => await ExecuteReaderAsync(
                 connection,
-                $"EXPLAIN (FORMAT JSON) {RequireSql(arguments)}",
+                $"EXPLAIN (FORMAT JSON) {ValidateSqlSafety(RequireSql(arguments))}",
                 command => command.CommandTimeout = mcpOptions.TimeoutSeconds,
                 cancellationToken),
             McpToolKind.ShowIndexes => await ExecuteReaderAsync(
@@ -220,5 +225,62 @@ public sealed class DatabaseMcpFallbackExecutor(
         }
 
         throw new InvalidOperationException($"Missing required MCP fallback argument. Expected one of: {string.Join(", ", keys)}.");
+    }
+
+    /* =========================
+     * SQL 安全验证
+     * 目的：阻止危险的写操作关键字
+     * 注意：Query/Explain 工具接受原始 SQL 用于分析，但必须配置只读连接字符串
+     * ========================= */
+    private static string ValidateSqlSafety(string sql)
+    {
+        var dangerousKeywords = new[]
+        {
+            "DROP", "DELETE", "UPDATE", "INSERT", "TRUNCATE", "ALTER", "CREATE"
+        };
+
+        var upperSql = sql.ToUpperInvariant();
+        foreach (var keyword in dangerousKeywords)
+        {
+            if (upperSql.Contains(keyword))
+            {
+                throw new InvalidOperationException(
+                    $"SQL contains dangerous keyword '{keyword}'. " +
+                    "MCP fallback executor only supports read-only operations. " +
+                    "Ensure connection string is configured with read-only credentials.");
+            }
+        }
+
+        return sql;
+    }
+
+    /* =========================
+     * 标识符转义
+     * 目的：防止表名注入攻击
+     * MySQL: 使用反引号 `table_name`
+     * PostgreSQL: 使用双引号 "table_name"
+     * ========================= */
+    private static string EscapeIdentifier(string identifier, DatabaseEngine engine)
+    {
+        if (string.IsNullOrWhiteSpace(identifier))
+        {
+            throw new ArgumentException("Identifier cannot be null or whitespace.", nameof(identifier));
+        }
+
+        // 移除已存在的引号，防止双重转义
+        identifier = identifier.Trim('`', '"', '[', ']');
+
+        // 检查是否包含危险字符
+        if (identifier.Contains(';') || identifier.Contains("--") || identifier.Contains("/*"))
+        {
+            throw new InvalidOperationException($"Identifier contains dangerous characters: {identifier}");
+        }
+
+        return engine switch
+        {
+            DatabaseEngine.MySql => $"`{identifier.Replace("`", "``")}`",
+            DatabaseEngine.PostgreSql => $"\"{identifier.Replace("\"", "\"\"")}\"",
+            _ => throw new ArgumentOutOfRangeException(nameof(engine), engine, "Unsupported database engine.")
+        };
     }
 }
