@@ -12,6 +12,8 @@ import {
   getReview,
   getWorkflow,
   submitReview,
+  getSlowQueries,
+  getSlowQueryDetail,
   type DashboardStats,
   type HistoryDetail,
   type HistoryListItem,
@@ -24,12 +26,14 @@ import {
   type WorkflowResultEnvelope,
   type WorkflowStatus,
   type WorkflowStreamEvent,
+  type SlowQueryListItem,
+  type SlowQueryDetail,
 } from './api'
 
 const stats = ref<DashboardStats | null>(null)
 const reviews = ref<ReviewListItem[]>([])
 const selectedTaskId = ref('')
-const activeView = ref<'sql' | 'db-config' | 'review' | 'history' | 'replay'>('sql')
+const activeView = ref<'sql' | 'db-config' | 'review' | 'history' | 'replay' | 'slow-query'>('sql')
 const selectedReview = ref<ReviewDetail | null>(null)
 const workflow = ref<WorkflowStatus | null>(null)
 const historyDetail = ref<HistoryDetail | null>(null)
@@ -69,6 +73,13 @@ const streamGeneration = ref(0)
 const replayIndex = ref(0)
 const replaySpeed = ref(1)
 const replayPlaying = ref(false)
+const selectedSlowQueryId = ref('')
+const slowQueryItems = ref<SlowQueryListItem[]>([])
+const slowQueryDetail = ref<SlowQueryDetail | null>(null)
+const slowQueryPage = ref(1)
+const slowQueryPageSize = ref(20)
+const slowQueryTotal = ref(0)
+const loadingSlowQueries = ref(false)
 
 let eventSource: EventSource | null = null
 let replayTimer: number | null = null
@@ -278,6 +289,40 @@ async function selectHistorySession(sessionId: string) {
   } catch (error) {
     errorMessage.value = getErrorText(error)
   }
+}
+
+async function loadSlowQueries() {
+  loadingSlowQueries.value = true
+  try {
+    const response = await getSlowQueries({
+      page: slowQueryPage.value,
+      pageSize: slowQueryPageSize.value,
+    })
+    slowQueryItems.value = response.items
+    slowQueryTotal.value = response.total
+
+    if (!selectedSlowQueryId.value && response.items.length > 0) {
+      void selectSlowQuery(response.items[0].queryId)
+    }
+  } catch (error) {
+    errorMessage.value = getErrorText(error)
+  } finally {
+    loadingSlowQueries.value = false
+  }
+}
+
+async function selectSlowQuery(queryId: string) {
+  selectedSlowQueryId.value = queryId
+  try {
+    slowQueryDetail.value = await getSlowQueryDetail(queryId)
+  } catch (error) {
+    errorMessage.value = getErrorText(error)
+  }
+}
+
+function navigateToAnalysisSession(sessionId: string) {
+  activeView.value = 'history'
+  void selectHistorySession(sessionId)
 }
 
 async function startSqlAnalysis() {
@@ -1028,6 +1073,9 @@ function getErrorText(error: unknown) {
       </button>
       <button type="button" class="view-tab" :class="{ active: activeView === 'replay' }" @click="activeView = 'replay'">
         运行回放
+      </button>
+      <button type="button" class="view-tab" :class="{ active: activeView === 'slow-query' }" @click="activeView = 'slow-query'">
+        慢查询
       </button>
     </nav>
 
@@ -1819,7 +1867,7 @@ function getErrorText(error: unknown) {
       </main>
     </section>
 
-    <section v-else class="workspace-grid replay-grid">
+    <section v-else-if="activeView === 'replay'" class="workspace-grid replay-grid">
       <aside class="panel review-queue">
         <div class="panel-head">
           <div>
@@ -1894,6 +1942,144 @@ function getErrorText(error: unknown) {
             <small>{{ formatDateTime(event.timestamp) }}</small>
             <small>{{ event.sessionId }}</small>
           </article>
+        </div>
+      </main>
+    </section>
+
+    <section v-else-if="activeView === 'slow-query'" class="workspace-grid history-grid">
+      <aside class="panel review-queue">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Slow Queries</p>
+            <h2>慢查询列表</h2>
+          </div>
+          <span class="panel-kicker">{{ slowQueryTotal }} 条</span>
+        </div>
+
+        <div v-if="loadingSlowQueries" class="empty-state">加载中...</div>
+
+        <div v-else-if="slowQueryItems.length === 0" class="empty-state">
+          暂无慢查询记录
+        </div>
+
+        <div v-else class="review-list">
+          <article
+            v-for="item in slowQueryItems"
+            :key="item.queryId"
+            class="review-card"
+            :class="{ active: selectedSlowQueryId === item.queryId }"
+            @click="selectSlowQuery(item.queryId)"
+          >
+            <div class="review-top">
+              <strong>{{ item.databaseId }}</strong>
+              <span class="badge" :class="`badge-${item.avgDuration > 5000 ? 'danger' : 'warning'}`">
+                {{ formatDurationMs(item.avgDuration) }}
+              </span>
+            </div>
+            <p class="sql-preview">{{ item.sqlText.substring(0, 80) }}...</p>
+            <div class="review-meta">
+              <small>执行 {{ item.executionCount }} 次</small>
+              <small>{{ formatDateTime(item.lastSeenAt) }}</small>
+            </div>
+          </article>
+        </div>
+
+        <div v-if="slowQueryTotal > slowQueryPageSize" class="pagination-row">
+          <button
+            class="ghost-button"
+            type="button"
+            :disabled="slowQueryPage === 1"
+            @click="slowQueryPage--; loadSlowQueries()"
+          >
+            上一页
+          </button>
+          <span>{{ slowQueryPage }} / {{ Math.ceil(slowQueryTotal / slowQueryPageSize) }}</span>
+          <button
+            class="ghost-button"
+            type="button"
+            :disabled="slowQueryPage >= Math.ceil(slowQueryTotal / slowQueryPageSize)"
+            @click="slowQueryPage++; loadSlowQueries()"
+          >
+            下一页
+          </button>
+        </div>
+      </aside>
+
+      <main class="panel review-detail">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Detail</p>
+            <h2>慢查询详情</h2>
+          </div>
+        </div>
+
+        <div v-if="!slowQueryDetail" class="empty-state">
+          从左侧列表选择一条慢查询查看详情
+        </div>
+
+        <div v-else class="detail-content">
+          <div class="summary-card">
+            <h3>基本信息</h3>
+            <dl class="info-grid">
+              <dt>Query ID</dt>
+              <dd>{{ slowQueryDetail.queryId }}</dd>
+              <dt>Database</dt>
+              <dd>{{ slowQueryDetail.databaseId }}</dd>
+              <dt>平均耗时</dt>
+              <dd>{{ formatDurationMs(slowQueryDetail.avgDuration) }}</dd>
+              <dt>最大耗时</dt>
+              <dd>{{ formatDurationMs(slowQueryDetail.maxDuration) }}</dd>
+              <dt>执行次数</dt>
+              <dd>{{ slowQueryDetail.executionCount }}</dd>
+              <dt>首次发现</dt>
+              <dd>{{ formatDateTime(slowQueryDetail.firstSeenAt) }}</dd>
+              <dt>最近发现</dt>
+              <dd>{{ formatDateTime(slowQueryDetail.lastSeenAt) }}</dd>
+            </dl>
+          </div>
+
+          <div class="summary-card">
+            <h3>SQL 语句</h3>
+            <pre class="sql-block">{{ slowQueryDetail.sqlText }}</pre>
+          </div>
+
+          <div v-if="slowQueryDetail.affectedTables.length > 0" class="summary-card">
+            <h3>涉及表</h3>
+            <ul class="table-list">
+              <li v-for="table in slowQueryDetail.affectedTables" :key="table">{{ table }}</li>
+            </ul>
+          </div>
+
+          <div v-if="slowQueryDetail.latestAnalysisSessionId" class="summary-card">
+            <h3>关联分析</h3>
+            <p>最近一次分析会话：</p>
+            <button
+              class="primary-button"
+              type="button"
+              @click="navigateToAnalysisSession(slowQueryDetail.latestAnalysisSessionId)"
+            >
+              查看分析结果 ({{ slowQueryDetail.latestAnalysisSessionId }})
+            </button>
+          </div>
+
+          <div v-if="slowQueryDetail.analysisHistory.length > 0" class="summary-card">
+            <h3>分析历史</h3>
+            <div class="timeline-list">
+              <article
+                v-for="history in slowQueryDetail.analysisHistory"
+                :key="history.sessionId"
+                class="timeline-item"
+              >
+                <div class="timeline-top">
+                  <strong>{{ history.sessionId }}</strong>
+                  <span class="badge" :class="`badge-${statusTone(history.status)}`">
+                    {{ formatStatusLabel(history.status) }}
+                  </span>
+                </div>
+                <small>{{ formatDateTime(history.analyzedAt) }}</small>
+              </article>
+            </div>
+          </div>
         </div>
       </main>
     </section>

@@ -25,6 +25,43 @@ export interface DashboardStats {
   }
 }
 
+export interface SlowQueryTrendItem {
+  date: string
+  count: number
+  avgDuration: number
+}
+
+export interface SlowQueryAlert {
+  alertId: string
+  queryId: string
+  databaseId: string
+  severity: string
+  message: string
+  createdAt: string
+  status: string
+}
+
+export interface SlowQueryListItem {
+  queryId: string
+  databaseId: string
+  sqlText: string
+  avgDuration: number
+  maxDuration: number
+  executionCount: number
+  lastSeenAt: string
+  latestAnalysisSessionId: string | null
+}
+
+export interface SlowQueryDetail extends SlowQueryListItem {
+  firstSeenAt: string
+  affectedTables: string[]
+  analysisHistory: Array<{
+    sessionId: string
+    analyzedAt: string
+    status: string
+  }>
+}
+
 export interface ReviewListItem {
   taskId: string
   sessionId: string
@@ -324,4 +361,44 @@ export function getHistoryReplay(sessionId: string) {
 export function createWorkflowEventSource(sessionId: string) {
   const url = new URL(`${apiBase}/api/workflows/${sessionId}/events`, window.location.origin)
   return new EventSource(url.toString())
+}
+
+export function getSlowQueryTrends(params: { databaseId: string; days?: number }) {
+  const query = new URLSearchParams()
+  query.set('databaseId', params.databaseId)
+  if (params.days) query.set('days', `${params.days}`)
+
+  return fetchEnvelope<SlowQueryTrendItem[]>(`/api/dashboard/slow-query-trends?${query.toString()}`)
+}
+
+export function getSlowQueryAlerts(params?: { databaseId?: string; status?: string }) {
+  const query = new URLSearchParams()
+  if (params?.databaseId) query.set('databaseId', params.databaseId)
+  if (params?.status) query.set('status', params.status)
+
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  return fetchEnvelope<SlowQueryAlert[]>(`/api/dashboard/slow-query-alerts${suffix}`)
+}
+
+export function getSlowQueries(params?: {
+  databaseId?: string
+  page?: number
+  pageSize?: number
+}) {
+  const query = new URLSearchParams()
+  if (params?.databaseId) query.set('databaseId', params.databaseId)
+  if (params?.page) query.set('page', `${params.page}`)
+  if (params?.pageSize) query.set('pageSize', `${params.pageSize}`)
+
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  return fetchEnvelope<{
+    items: SlowQueryListItem[]
+    total: number
+    page: number
+    pageSize: number
+  }>(`/api/slow-queries${suffix}`)
+}
+
+export function getSlowQueryDetail(queryId: string) {
+  return fetchEnvelope<SlowQueryDetail>(`/api/slow-queries/${queryId}`)
 }
