@@ -83,11 +83,7 @@ internal static class WorkflowEventsApiRouteBuilderExtensions
 
                 if (completedTask == heartbeatTask)
                 {
-                    if (!heartbeatTask.Result)
-                    {
-                        break;
-                    }
-
+                    await heartbeatTask;
                     await WriteHeartbeatAsync(response, cancellationToken);
                     continue;
                 }
