@@ -12,7 +12,7 @@ namespace DbOptimizer.Infrastructure.Workflows;
 public interface IConfigCollectionProvider
 {
     Task<DbConfigSnapshot> CollectConfigAsync(
-        DatabaseOptimizationEngine databaseEngine,
+        DbOptimizer.Core.Models.DatabaseOptimizationEngine databaseEngine,
         string databaseId,
         CancellationToken cancellationToken = default);
 }
@@ -33,7 +33,7 @@ public sealed class ConfigCollectionProvider(
     private static readonly string[] ConfigToolAliases = ["get_config", "get_configuration", "GetConfiguration", "show_variables"];
 
     public async Task<DbConfigSnapshot> CollectConfigAsync(
-        DatabaseOptimizationEngine databaseEngine,
+        DbOptimizer.Core.Models.DatabaseOptimizationEngine databaseEngine,
         string databaseId,
         CancellationToken cancellationToken = default)
     {
@@ -160,12 +160,12 @@ public sealed class ConfigCollectionProvider(
             $"MCP 服务器未提供配置收集工具。可用工具：{string.Join(", ", toolList)}");
     }
 
-    private ConfigCollectionMcpServerOptions ResolveServerOptions(DatabaseOptimizationEngine databaseEngine)
+    private ConfigCollectionMcpServerOptions ResolveServerOptions(DbOptimizer.Core.Models.DatabaseOptimizationEngine databaseEngine)
     {
         var sectionName = databaseEngine switch
         {
-            DatabaseOptimizationEngine.MySql => "DbOptimizer:ConfigCollection:MySql",
-            DatabaseOptimizationEngine.PostgreSql => "DbOptimizer:ConfigCollection:PostgreSql",
+            DbOptimizer.Core.Models.DatabaseOptimizationEngine.MySql => "DbOptimizer:ConfigCollection:MySql",
+            DbOptimizer.Core.Models.DatabaseOptimizationEngine.PostgreSql => "DbOptimizer:ConfigCollection:PostgreSql",
             _ => throw new NotSupportedException($"不支持的数据库引擎：{databaseEngine}")
         };
 
