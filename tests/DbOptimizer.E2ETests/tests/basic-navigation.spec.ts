@@ -15,7 +15,7 @@ test.describe('基础导航测试', () => {
   });
 
   test('验证 API 健康检查', async ({ request }) => {
-    const response = await request.get('http://localhost:8669/health');
+    const response = await request.get('http://localhost:15069/health');
     expect(response.ok()).toBeTruthy();
 
     const text = await response.text();

@@ -91,9 +91,17 @@ dotnet run --project src/DbOptimizer.AppHost
 
 4. **访问应用**
 ```
-http://localhost:5000  # Web UI
-http://localhost:5001  # Aspire Dashboard
+https://localhost:17170 # Aspire AppHost / Dashboard 登录入口
+http://localhost:15069  # API 对外固定入口 / Swagger / Health
+http://localhost:10817  # Web 对外固定入口
 ```
+
+说明：
+- 在 Aspire 下，`15069` 是 API 的固定发布端口。
+- 在 Aspire 下，`10817` 是 Web 的稳定入口。
+- `8669` 在当前 Windows 环境位于 TCP excluded port range 内，无法稳定绑定，因此不再使用。
+- 现在不再对 API/Web 端口做 fallback 猜测。缺少 `PORT` 或 `VITE_API_PROXY_TARGET` 时，前端会直接启动失败。
+- 不应该再把容器或进程里看到的内部监听端口当成浏览器入口；浏览器和前端只认 AppHost 明确发布出来的固定端口。
 
 ---
 

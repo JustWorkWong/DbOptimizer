@@ -9,10 +9,12 @@ export default defineConfig({
   reporter: 'html',
 
   use: {
-    baseURL: 'http://localhost:5173',
-    trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    baseURL: 'http://localhost:9158',
+    trace: 'on',
+    screenshot: 'on',
+    video: 'on',
+    headless: false, // 显示浏览器
+    slowMo: 500, // 每个操作延迟 500ms，方便观察
   },
 
   projects: [
@@ -23,8 +25,8 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'echo "请手动启动 Aspire: cd ../../src/DbOptimizer.AppHost && dotnet run"',
-    url: 'http://localhost:5173',
+    command: 'echo "Aspire already running"',
+    url: 'http://localhost:9158',
     reuseExistingServer: true,
     timeout: 120 * 1000,
   },

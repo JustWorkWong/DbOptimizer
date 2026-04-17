@@ -8,6 +8,8 @@ var builder = DistributedApplication.CreateBuilder(args);
 
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
 
+var apiPort = GetRequiredPort("DbOptimizer:Endpoints:ApiPort");
+var webPort = GetRequiredPort("DbOptimizer:Endpoints:WebPort");
 var postgresPort = GetRequiredPort("DbOptimizer:Databases:PostgreSql:Port");
 var mySqlPort = GetRequiredPort("DbOptimizer:Databases:MySql:Port");
 var redisPort = GetRequiredPort("DbOptimizer:Databases:Redis:Port");
@@ -58,7 +60,19 @@ var redis = builder.AddRedis("redis")
         redisInsight.WithHostPort(redisInsightPort);
     });
 
-var api = builder.AddProject<Projects.DbOptimizer_API>("api")
+var api = builder.AddProject<Projects.DbOptimizer_API>("api", options =>
+    {
+        options.ExcludeLaunchProfile = true;
+    })
+    .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
+    .WithEnvironment("ASPNETCORE_URLS", $"http://localhost:{apiPort.ToString(CultureInfo.InvariantCulture)}")
+    .WithHttpEndpoint(
+        targetPort: apiPort,
+        port: apiPort,
+        name: "http",
+        env: "ASPNETCORE_HTTP_PORTS",
+        isProxied: false)
+    .WithExternalHttpEndpoints()
     .WaitFor(postgresDb)
     .WaitFor(mySqlDb)
     .WaitFor(redis)
@@ -72,7 +86,18 @@ builder.AddProject<Projects.DbOptimizer_AgentRuntime>("agentruntime")
     .WithReference(redis);
 
 builder.AddViteApp("web", "../DbOptimizer.Web")
+    .WithEndpoint("http", endpoint =>
+    {
+        endpoint.Port = webPort;
+        endpoint.TargetPort = webPort;
+        endpoint.IsProxied = false;
+    })
+    .WithExternalHttpEndpoints()
     .WithReference(api)
+    .WaitFor(api)
+    // Fail fast on missing wiring: frontend should always target the API's published endpoint,
+    // never an internal Aspire-assigned port discovered from process or container inspection.
+    .WithEnvironment("PORT", webPort.ToString(CultureInfo.InvariantCulture))
     .WithEnvironment("VITE_API_PROXY_TARGET", api.GetEndpoint("http"));
 
 builder.Build().Run();
