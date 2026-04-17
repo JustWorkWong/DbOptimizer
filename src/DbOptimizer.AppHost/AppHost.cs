@@ -65,12 +65,9 @@ var api = builder.AddProject<Projects.DbOptimizer_API>("api", options =>
         options.ExcludeLaunchProfile = true;
     })
     .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
-    .WithEnvironment("ASPNETCORE_URLS", $"http://localhost:{apiPort.ToString(CultureInfo.InvariantCulture)}")
     .WithHttpEndpoint(
-        targetPort: apiPort,
         port: apiPort,
         name: "http",
-        env: "ASPNETCORE_HTTP_PORTS",
         isProxied: false)
     .WithExternalHttpEndpoints()
     .WaitFor(postgresDb)
@@ -81,19 +78,11 @@ var api = builder.AddProject<Projects.DbOptimizer_API>("api", options =>
     .WithReference(redis);
 
 builder.AddViteApp("web", "../DbOptimizer.Web")
-    .WithEndpoint("http", endpoint =>
-    {
-        endpoint.Port = webPort;
-        endpoint.TargetPort = webPort;
-        endpoint.IsProxied = false;
-    })
+    .WithHttpEndpoint(port: webPort, name: "http", isProxied: false)
     .WithExternalHttpEndpoints()
     .WithReference(api)
     .WaitFor(api)
-    // Fail fast on missing wiring: frontend should always target the API's published endpoint,
-    // never an internal Aspire-assigned port discovered from process or container inspection.
-    .WithEnvironment("PORT", webPort.ToString(CultureInfo.InvariantCulture))
-    .WithEnvironment("VITE_API_PROXY_TARGET", api.GetEndpoint("http"));
+    .WithEnvironment("VITE_API_BASE_URL", api.GetEndpoint("http"));
 
 builder.Build().Run();
 
