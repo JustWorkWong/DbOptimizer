@@ -196,12 +196,18 @@ builder.Services.AddSingleton<IWorkflowExecutor, ConfigReviewExecutor>();
 
 // MAF SQL Analysis Executors
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Maf.SqlAnalysis.ISqlRewriteAdvisor, DbOptimizer.Infrastructure.Maf.SqlAnalysis.NoOpSqlRewriteAdvisor>();
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Maf.SqlAnalysis.ISqlReviewAdjustmentService, DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlReviewAdjustmentService>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Maf.SqlAnalysis.Executors.SqlInputValidationExecutor>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Maf.SqlAnalysis.Executors.SqlParserMafExecutor>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Maf.SqlAnalysis.Executors.ExecutionPlanMafExecutor>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Maf.SqlAnalysis.Executors.IndexAdvisorMafExecutor>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Maf.SqlAnalysis.Executors.SqlRewriteMafExecutor>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Maf.SqlAnalysis.Executors.SqlCoordinatorMafExecutor>();
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Maf.SqlAnalysis.Executors.SqlHumanReviewGateExecutor>();
+
+// Workflow Review Services
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Review.IWorkflowReviewTaskGateway, DbOptimizer.Infrastructure.Workflows.Review.WorkflowReviewTaskGateway>();
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Review.IWorkflowReviewResponseFactory, DbOptimizer.Infrastructure.Workflows.Review.WorkflowReviewResponseFactory>();
 
 builder.Services.AddSingleton<ISlowQueryCollector, SlowQueryCollector>();
 builder.Services.AddSingleton<ISlowQueryNormalizer, SlowQueryNormalizer>();
