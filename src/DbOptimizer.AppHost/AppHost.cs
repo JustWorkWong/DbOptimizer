@@ -78,7 +78,7 @@ var api = builder.AddProject<Projects.DbOptimizer_API>("api", options =>
     .WithReference(redis);
 
 builder.AddViteApp("web", "../DbOptimizer.Web")
-    .WithHttpEndpoint(port: webPort, name: "http", isProxied: false)
+    .WithHttpEndpoint(port: webPort, name: "web-http", isProxied: false)
     .WithExternalHttpEndpoints()
     .WithReference(api)
     .WaitFor(api)
