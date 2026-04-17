@@ -4,6 +4,8 @@ using DbOptimizer.Infrastructure.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
 using DbOptimizer.Infrastructure.SlowQuery;
+using DbOptimizer.Infrastructure.Maf.Runtime;
+using DbOptimizer.Infrastructure.Mcp;
 using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
 using Microsoft.OpenApi.Models;
@@ -27,6 +29,8 @@ var slowQueryExecutionPlanOptions = builder.Configuration
     ?? CreateDefaultSlowQueryExecutionPlanOptions();
 var workflowRuntimeOptions = builder.Configuration.GetSection(WorkflowRuntimeOptions.SectionName).Get<WorkflowRuntimeOptions>()
     ?? new WorkflowRuntimeOptions();
+var mafWorkflowRuntimeOptions = builder.Configuration.GetSection("MafWorkflowRuntime").Get<MafWorkflowRuntimeOptions>()
+    ?? new MafWorkflowRuntimeOptions();
 var configCollectionOptions = builder.Configuration.GetSection(ConfigCollectionOptions.SectionName).Get<ConfigCollectionOptions>()
     ?? new ConfigCollectionOptions();
 var slowQueryCollectionOptions = builder.Configuration.GetSection(SlowQueryCollectionOptions.SectionName).Get<SlowQueryCollectionOptions>()
@@ -140,6 +144,13 @@ builder.Services.AddSingleton(slowQueryExecutionPlanOptions);
 builder.Services.AddSingleton(workflowRuntimeOptions);
 builder.Services.AddSingleton(configCollectionOptions);
 builder.Services.AddSingleton(slowQueryCollectionOptions);
+
+// MAF Workflow Runtime 服务注册（新增，与旧 runner 并行）
+builder.Services.AddSingleton(mafWorkflowRuntimeOptions);
+builder.Services.AddSingleton<IMafWorkflowFactory, MafWorkflowFactory>();
+builder.Services.AddSingleton<IMafWorkflowRuntime, MafWorkflowRuntime>();
+builder.Services.AddSingleton<IMafRunStateStore, MafRunStateStore>();
+builder.Services.AddSingleton<IMcpFallbackStrategy, McpFallbackStrategy>();
 
 // MCP 服务注册
 var mcpOptions = builder.Configuration.GetSection("DbOptimizer:Mcp").Get<DbOptimizer.Infrastructure.Mcp.McpOptions>()
