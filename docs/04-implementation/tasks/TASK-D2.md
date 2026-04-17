@@ -54,3 +54,4 @@
 
 - 前端具备配置调优完整入口
 - 结果渲染不再依赖旧 `OptimizationReport`
+- WorkflowResultPanel 设计为通用组件，可被 review/history/slow-query 复用

@@ -29,6 +29,8 @@
    - `Task SaveAsync(MafCheckpointEnvelope checkpoint, CancellationToken cancellationToken = default);`
    - `Task<MafCheckpointEnvelope?> GetAsync(Guid sessionId, CancellationToken cancellationToken = default);`
    - `Task DeleteAsync(Guid sessionId, CancellationToken cancellationToken = default);`
+5. `src/DbOptimizer.Infrastructure/Mcp/IMcpFallbackStrategy.cs`
+   - `Task<T> ExecuteWithFallbackAsync<T>(Func<Task<T>> mcpCall, Func<Task<T>> fallback, CancellationToken cancellationToken = default);`
 
 ## Files To Modify
 
@@ -37,10 +39,11 @@
 
 ## Steps
 
-1. 引入 `Microsoft.Agents.AI.Workflows` 包。
+1. 引入 `Microsoft.Agents.AI.Workflows` 包（版本 1.0.0-rc4，参考 MAF_WORKFLOW_ARCHITECTURE.md）。
 2. 新建 runtime 接口与 options。
-3. 在 `Program.cs` 注册 runtime/factory/state-store 接口。
-4. 不要删除旧 runner，先并行保留。
+3. 新建 MCP fallback strategy 接口（用于超时/错误处理）。
+4. 在 `Program.cs` 注册 runtime/factory/state-store 接口。
+5. 不要删除旧 runner，先并行保留。
 
 ## Verification
 
