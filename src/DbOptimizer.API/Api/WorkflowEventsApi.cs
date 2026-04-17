@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
+using DbOptimizer.Infrastructure.Workflows.Application;
 using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.API.Api;
@@ -20,11 +21,11 @@ internal static class WorkflowEventsApiRouteBuilderExtensions
         Guid sessionId,
         HttpContext httpContext,
         IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
-        IWorkflowQueryService workflowQueryService,
+        IWorkflowApplicationService workflowApplicationService,
         IWorkflowEventQueryService workflowEventQueryService,
         CancellationToken cancellationToken)
     {
-        var workflow = await workflowQueryService.GetAsync(sessionId, cancellationToken);
+        var workflow = await workflowApplicationService.GetAsync(sessionId, cancellationToken);
         if (workflow is null)
         {
             httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
