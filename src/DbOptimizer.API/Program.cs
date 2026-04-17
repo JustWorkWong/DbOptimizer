@@ -136,6 +136,12 @@ builder.Services.AddSingleton<IWorkflowResultSerializer, WorkflowResultSerialize
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Application.IWorkflowApplicationService, DbOptimizer.Infrastructure.Workflows.Application.WorkflowApplicationService>();
 builder.Services.AddSingleton<IReviewApplicationService, ReviewApplicationService>();
 builder.Services.AddSingleton<IHistoryQueryService, HistoryQueryService>();
+
+// Workflow 事件投影与监控服务
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Events.IMafWorkflowEventAdapter, DbOptimizer.Infrastructure.Workflows.Events.MafWorkflowEventAdapter>();
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Events.IWorkflowProgressCalculator, DbOptimizer.Infrastructure.Workflows.Events.WorkflowProgressCalculator>();
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Monitoring.ITokenUsageRecorder, DbOptimizer.Infrastructure.Workflows.Monitoring.TokenUsageRecorder>();
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Projection.IWorkflowProjectionWriter, DbOptimizer.Infrastructure.Workflows.Projection.WorkflowProjectionWriter>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.ISqlParser, DbOptimizer.Infrastructure.Workflows.LightweightSqlParser>();
 builder.Services.AddSingleton<DbOptimizer.Core.Models.ISqlParser, DbOptimizer.Core.Models.LightweightSqlParser>();
 builder.Services.AddSingleton(workflowExecutionPlanOptions);

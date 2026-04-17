@@ -3,6 +3,7 @@ using System.Text.Json;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
 using DbOptimizer.Infrastructure.Workflows.Application;
+using DbOptimizer.Infrastructure.Workflows.Events;
 using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.API.Api;
@@ -23,6 +24,7 @@ internal static class WorkflowEventsApiRouteBuilderExtensions
         IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
         IWorkflowApplicationService workflowApplicationService,
         IWorkflowEventQueryService workflowEventQueryService,
+        IMafWorkflowEventAdapter mafWorkflowEventAdapter,
         CancellationToken cancellationToken)
     {
         var workflow = await workflowApplicationService.GetAsync(sessionId, cancellationToken);
@@ -54,25 +56,28 @@ internal static class WorkflowEventsApiRouteBuilderExtensions
             .Select(item => item.State)
             .SingleAsync(cancellationToken);
         var checkpoint = WorkflowCheckpointJson.Deserialize(persistedState);
-        var persistedEvents = WorkflowTimeline.GetEvents(checkpoint)
+        var mafEvents = WorkflowTimeline.GetEvents(checkpoint)
             .Where(item => item.Sequence > lastEventId)
             .OrderBy(item => item.Sequence)
             .ToArray();
 
-        var highestPersistedSequence = persistedEvents.LastOrDefault()?.Sequence ?? lastEventId;
-        foreach (var workflowEvent in persistedEvents)
+        var businessEvents = mafWorkflowEventAdapter.Map(sessionId, workflow.WorkflowType, mafEvents);
+
+        var highestPersistedSequence = businessEvents.LastOrDefault()?.Sequence ?? lastEventId;
+        foreach (var businessEvent in businessEvents)
         {
-            await WriteEventAsync(response, workflowEvent, cancellationToken);
+            await WriteBusinessEventAsync(response, businessEvent, cancellationToken);
         }
 
-        await WriteSnapshotAsync(response, workflow, cancellationToken);
+        await WriteSnapshotAsync(response, workflow, mafWorkflowEventAdapter, cancellationToken);
 
         var subscription = workflowEventQueryService.Subscribe(sessionId, highestPersistedSequence);
         try
         {
-            foreach (var backlogEvent in subscription.Backlog)
+            var backlogBusinessEvents = mafWorkflowEventAdapter.Map(sessionId, workflow.WorkflowType, subscription.Backlog);
+            foreach (var backlogEvent in backlogBusinessEvents)
             {
-                await WriteEventAsync(response, backlogEvent, cancellationToken);
+                await WriteBusinessEventAsync(response, backlogEvent, cancellationToken);
             }
 
             var lastHeartbeat = DateTime.UtcNow;
@@ -91,15 +96,21 @@ internal static class WorkflowEventsApiRouteBuilderExtensions
                     var hasData = await subscription.Reader.WaitToReadAsync(timeoutCts.Token);
                     if (hasData)
                     {
-                        while (subscription.Reader.TryRead(out var workflowEvent))
+                        var newEvents = new List<WorkflowEventRecord>();
+                        while (subscription.Reader.TryRead(out var mafEvent))
                         {
-                            await WriteEventAsync(response, workflowEvent, cancellationToken);
+                            newEvents.Add(mafEvent);
+                        }
+
+                        var newBusinessEvents = mafWorkflowEventAdapter.Map(sessionId, workflow.WorkflowType, newEvents);
+                        foreach (var businessEvent in newBusinessEvents)
+                        {
+                            await WriteBusinessEventAsync(response, businessEvent, cancellationToken);
                         }
                     }
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
-                    // Timeout reached, send heartbeat
                     await WriteHeartbeatAsync(response, cancellationToken);
                     lastHeartbeat = DateTime.UtcNow;
                 }
@@ -111,25 +122,15 @@ internal static class WorkflowEventsApiRouteBuilderExtensions
         }
     }
 
-    private static async Task WriteEventAsync(
+    private static async Task WriteBusinessEventAsync(
         HttpResponse response,
-        WorkflowEventRecord workflowEvent,
+        WorkflowEventRecord businessEvent,
         CancellationToken cancellationToken)
     {
-        var payload = new
-        {
-            eventType = workflowEvent.EventType.ToString(),
-            sessionId = workflowEvent.SessionId,
-            workflowType = workflowEvent.WorkflowType,
-            sequence = workflowEvent.Sequence,
-            timestamp = workflowEvent.Timestamp,
-            payload = workflowEvent.Payload
-        };
-
         var builder = new StringBuilder();
-        builder.Append("id: ").Append(workflowEvent.Sequence).AppendLine();
-        builder.Append("event: WorkflowEvent").AppendLine();
-        builder.Append("data: ").Append(JsonSerializer.Serialize(payload, SerializerOptions)).AppendLine().AppendLine();
+        builder.Append("id: ").Append(businessEvent.Sequence).AppendLine();
+        builder.Append("event: workflow-event").AppendLine();
+        builder.Append("data: ").Append(businessEvent.Payload.GetRawText()).AppendLine().AppendLine();
 
         await response.WriteAsync(builder.ToString(), cancellationToken);
         await response.Body.FlushAsync(cancellationToken);
@@ -149,19 +150,13 @@ internal static class WorkflowEventsApiRouteBuilderExtensions
     private static async Task WriteSnapshotAsync(
         HttpResponse response,
         WorkflowStatusResponse workflow,
+        IMafWorkflowEventAdapter mafWorkflowEventAdapter,
         CancellationToken cancellationToken)
     {
-        var payload = JsonSerializer.Serialize(new
-        {
-            eventType = "WorkflowSnapshot",
-            sessionId = workflow.SessionId,
-            timestamp = DateTimeOffset.UtcNow,
-            payload = workflow
-        }, SerializerOptions);
-
+        var snapshotRecord = mafWorkflowEventAdapter.CreateSnapshot(workflow);
         var builder = new StringBuilder();
         builder.Append("event: snapshot").AppendLine();
-        builder.Append("data: ").Append(payload).AppendLine().AppendLine();
+        builder.Append("data: ").Append(snapshotRecord.Payload.GetRawText()).AppendLine().AppendLine();
 
         await response.WriteAsync(builder.ToString(), cancellationToken);
         await response.Body.FlushAsync(cancellationToken);
