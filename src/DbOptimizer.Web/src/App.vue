@@ -14,6 +14,8 @@ import {
   submitReview,
   getSlowQueries,
   getSlowQueryDetail,
+  getSlowQueryTrends,
+  getSlowQueryAlerts,
   type DashboardStats,
   type HistoryDetail,
   type HistoryListItem,
@@ -28,12 +30,22 @@ import {
   type WorkflowStreamEvent,
   type SlowQueryListItem,
   type SlowQueryDetail,
+  type SlowQueryTrendItem,
+  type SlowQueryAlert,
 } from './api'
+import DashboardStatsPanel from './components/dashboard/DashboardStatsPanel.vue'
+import SlowQueryTrendChart from './components/dashboard/SlowQueryTrendChart.vue'
+import SlowQueryAlertList from './components/dashboard/SlowQueryAlertList.vue'
 
 const stats = ref<DashboardStats | null>(null)
 const reviews = ref<ReviewListItem[]>([])
 const selectedTaskId = ref('')
-const activeView = ref<'sql' | 'db-config' | 'review' | 'history' | 'replay' | 'slow-query'>('sql')
+const activeView = ref<'dashboard' | 'sql' | 'db-config' | 'review' | 'history' | 'replay' | 'slow-query'>('dashboard')
+const dashboardStats = ref<DashboardStats | null>(null)
+const slowQueryTrend = ref<SlowQueryTrendItem[]>([])
+const slowQueryAlerts = ref<SlowQueryAlert[]>([])
+const dashboardDatabaseFilter = ref('')
+const loadingDashboard = ref(false)
 const selectedReview = ref<ReviewDetail | null>(null)
 const workflow = ref<WorkflowStatus | null>(null)
 const historyDetail = ref<HistoryDetail | null>(null)
@@ -177,7 +189,7 @@ const workflowProgressSummary = computed(() => {
 const canOpenCurrentReview = computed(() => Boolean(workflow.value?.reviewId))
 
 onMounted(async () => {
-  await Promise.all([loadDashboard(), loadReviews(), loadHistoryList()])
+  await Promise.all([loadDashboard(), loadReviews(), loadHistoryList(), loadDashboardWorkspace()])
 })
 
 onBeforeUnmount(() => {
@@ -286,6 +298,38 @@ async function selectHistorySession(sessionId: string) {
     ])
     historyDetail.value = detail
     replayEvents.value = replay.events
+  } catch (error) {
+    errorMessage.value = getErrorText(error)
+  }
+}
+
+async function loadDashboardWorkspace() {
+  loadingDashboard.value = true
+  try {
+    const [statsData, trendsData, alertsData] = await Promise.all([
+      getDashboardStats(),
+      getSlowQueryTrends({ databaseId: dashboardDatabaseFilter.value || 'mysql-local', days: 7 }),
+      getSlowQueryAlerts({ databaseId: dashboardDatabaseFilter.value || undefined, status: 'open' }),
+    ])
+    dashboardStats.value = statsData
+    slowQueryTrend.value = trendsData
+    slowQueryAlerts.value = alertsData
+  } catch (error) {
+    errorMessage.value = getErrorText(error)
+  } finally {
+    loadingDashboard.value = false
+  }
+}
+
+async function selectDashboardDatabase(databaseId: string) {
+  dashboardDatabaseFilter.value = databaseId
+  try {
+    const [trendsData, alertsData] = await Promise.all([
+      getSlowQueryTrends({ databaseId: databaseId || 'mysql-local', days: 7 }),
+      getSlowQueryAlerts({ databaseId: databaseId || undefined, status: 'open' }),
+    ])
+    slowQueryTrend.value = trendsData
+    slowQueryAlerts.value = alertsData
   } catch (error) {
     errorMessage.value = getErrorText(error)
   }
@@ -1059,6 +1103,9 @@ function getErrorText(error: unknown) {
     </header>
 
     <nav class="view-switcher" aria-label="workspace views">
+      <button type="button" class="view-tab" :class="{ active: activeView === 'dashboard' }" @click="activeView = 'dashboard'">
+        仪表盘
+      </button>
       <button type="button" class="view-tab" :class="{ active: activeView === 'sql' }" @click="activeView = 'sql'">
         SQL 调优
       </button>
@@ -1078,6 +1125,40 @@ function getErrorText(error: unknown) {
         慢查询
       </button>
     </nav>
+
+    <section v-if="activeView === 'dashboard'" class="workspace-grid dashboard-grid">
+      <main class="panel dashboard-main">
+        <div class="panel-head">
+          <div>
+            <p class="panel-kicker">Dashboard</p>
+            <h2>系统概览</h2>
+          </div>
+          <button class="ghost-button" type="button" @click="loadDashboardWorkspace">刷新</button>
+        </div>
+
+        <div v-if="loadingDashboard" class="loading-state">加载中...</div>
+
+        <div v-else class="dashboard-content">
+          <DashboardStatsPanel :stats="dashboardStats" />
+
+          <div class="dashboard-filters">
+            <label class="field-label">
+              数据库筛选
+              <select v-model="dashboardDatabaseFilter" @change="selectDashboardDatabase(dashboardDatabaseFilter)">
+                <option value="">全部</option>
+                <option value="mysql-local">mysql-local</option>
+                <option value="postgres-local">postgres-local</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="dashboard-charts">
+            <SlowQueryTrendChart :trends="slowQueryTrend" />
+            <SlowQueryAlertList :alerts="slowQueryAlerts" @select-alert="(alertId) => console.log('Alert selected:', alertId)" />
+          </div>
+        </div>
+      </main>
+    </section>
 
     <section v-if="activeView === 'sql'" class="workspace-grid sql-grid">
       <main class="panel review-detail">
