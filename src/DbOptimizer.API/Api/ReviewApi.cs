@@ -3,6 +3,8 @@ using DbOptimizer.Core.Models;
 using DbOptimizer.Infrastructure.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
+using DbOptimizer.Infrastructure.Workflows.Review;
+using DbOptimizer.Infrastructure.Maf.Runtime;
 using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.API.Api;
@@ -137,7 +139,10 @@ internal sealed class ReviewApplicationService(
     ICheckpointStorage checkpointStorage,
     IWorkflowExecutionScheduler workflowExecutionScheduler,
     IWorkflowResultSerializer workflowResultSerializer,
-    IWorkflowEventPublisher workflowEventPublisher) : IReviewApplicationService
+    IWorkflowEventPublisher workflowEventPublisher,
+    IWorkflowReviewTaskGateway reviewTaskGateway,
+    IWorkflowReviewResponseFactory reviewResponseFactory,
+    IMafWorkflowRuntime mafWorkflowRuntime) : IReviewApplicationService
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
@@ -225,6 +230,7 @@ internal sealed class ReviewApplicationService(
 
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var reviewTask = await dbContext.ReviewTasks
+            .Include(x => x.Session)
             .SingleOrDefaultAsync(task => task.TaskId == taskId, cancellationToken);
 
         if (reviewTask is null)
@@ -245,6 +251,16 @@ internal sealed class ReviewApplicationService(
                 new { taskId, status = reviewTask.Status });
         }
 
+        // 检查是否为 MAF workflow（通过 engine_type 判断）
+        var isMafWorkflow = string.Equals(reviewTask.Session.EngineType, "maf", StringComparison.OrdinalIgnoreCase);
+
+        if (isMafWorkflow)
+        {
+            // MAF workflow 路径：通过 gateway 读取 correlation 并恢复
+            return await HandleMafWorkflowReviewAsync(taskId, reviewTask, request, normalizedAction, cancellationToken);
+        }
+
+        // 旧 workflow 路径：保持原有逻辑
         var checkpoint = await checkpointStorage.LoadCheckpointAsync(reviewTask.SessionId, cancellationToken);
         if (checkpoint is null)
         {
@@ -497,5 +513,54 @@ internal sealed class ReviewApplicationService(
         }
 
         return JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json, SerializerOptions);
+    }
+
+    private async Task<ReviewSubmitResponse> HandleMafWorkflowReviewAsync(
+        Guid taskId,
+        ReviewTaskEntity reviewTask,
+        SubmitReviewRequest request,
+        string normalizedAction,
+        CancellationToken cancellationToken)
+    {
+        var correlation = await reviewTaskGateway.GetCorrelationAsync(taskId, cancellationToken);
+
+        if (correlation is null)
+        {
+            throw new ApiException(
+                StatusCodes.Status404NotFound,
+                "CORRELATION_NOT_FOUND",
+                "Review task correlation data not found.",
+                new { taskId });
+        }
+
+        var reviewedAt = DateTimeOffset.UtcNow;
+        var adjustments = request.Adjustments ?? new Dictionary<string, JsonElement>();
+
+        // 更新 review_tasks 状态
+        await reviewTaskGateway.UpdateStatusAsync(
+            taskId,
+            MapReviewTaskStatus(normalizedAction),
+            request.Comment?.Trim(),
+            adjustments.Count > 0 ? JsonSerializer.Serialize(adjustments, SerializerOptions) : null,
+            reviewedAt,
+            cancellationToken);
+
+        // 构建 ReviewDecisionResponseMessage
+        var responseMessage = reviewResponseFactory.CreateSqlResponse(
+            correlation.SessionId,
+            taskId,
+            correlation.RequestId,
+            correlation.EngineRunId,
+            correlation.CheckpointRef,
+            normalizedAction,
+            request.Comment,
+            adjustments);
+
+        // 通过 MAF runtime 恢复 workflow（暂时使用 sessionId，后续需要扩展 ResumeAsync 支持 response message）
+        await mafWorkflowRuntime.ResumeAsync(
+            correlation.SessionId,
+            cancellationToken);
+
+        return new ReviewSubmitResponse(taskId, MapReviewTaskStatus(normalizedAction), reviewedAt);
     }
 }
