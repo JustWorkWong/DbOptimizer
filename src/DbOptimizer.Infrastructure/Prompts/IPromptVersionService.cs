@@ -30,6 +30,15 @@ public interface IPromptVersionService
         int pageSize = 20,
         CancellationToken cancellationToken = default);
 
+    Task<PromptVersionDto?> GetActiveAsync(
+        string agentName,
+        CancellationToken cancellationToken = default);
+
+    Task<PromptVersionDto?> GetByVersionAsync(
+        string agentName,
+        int versionNumber,
+        CancellationToken cancellationToken = default);
+
     Task<PromptVersionDto> CreateAsync(
         CreatePromptVersionRequest request,
         CancellationToken cancellationToken = default);
