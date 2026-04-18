@@ -331,7 +331,7 @@ public sealed class WorkflowExecutionAuditService(
                 break;
         }
 
-        if (string.Equals(executorName, "IndexAdvisorExecutor", StringComparison.Ordinal) &&
+        if (string.Equals(executorName, "IndexAdvisorMafExecutor", StringComparison.Ordinal) &&
             context.TryGet<Dictionary<string, TableIndexMetadata>>(WorkflowContextKeys.TableIndexMetadata, out var tableIndexes) &&
             tableIndexes is not null)
         {
@@ -435,7 +435,8 @@ public sealed class WorkflowExecutionAuditService(
                     }));
                 break;
             default:
-                if (string.Equals(executorName, "HumanReviewExecutor", StringComparison.Ordinal))
+                if (string.Equals(executorName, "SqlHumanReviewGateExecutor", StringComparison.Ordinal) ||
+                    string.Equals(executorName, "ConfigHumanReviewGateExecutor", StringComparison.Ordinal))
                 {
                     decisionRecords.Add(CreateDecisionRecord(
                         executionId,
@@ -478,7 +479,7 @@ public sealed class WorkflowExecutionAuditService(
                 }));
         }
 
-        if (string.Equals(executorName, "IndexAdvisorExecutor", StringComparison.Ordinal) &&
+        if (string.Equals(executorName, "IndexAdvisorMafExecutor", StringComparison.Ordinal) &&
             context.TryGet<Dictionary<string, TableIndexMetadata>>(WorkflowContextKeys.TableIndexMetadata, out var tableIndexes) &&
             tableIndexes is not null)
         {

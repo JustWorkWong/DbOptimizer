@@ -65,16 +65,22 @@ public static class WorkflowEventPayloadFactory
     {
         return executorName switch
         {
-            "SqlParserExecutor" => "SQL parsing",
-            "ExecutionPlanExecutor" => "Execution plan analysis",
-            "IndexAdvisorExecutor" => "Index recommendation",
-            "CoordinatorExecutor" => "Result coordination",
-            "HumanReviewExecutor" => "Human review",
-            "RegenerationExecutor" => "Result regeneration",
-            "ConfigCollectorExecutor" => "Config collection",
-            "ConfigAnalyzerExecutor" => "Config analysis",
-            "ConfigCoordinatorExecutor" => "Config coordination",
-            "ConfigReviewExecutor" => "Config review",
+            // MAF SQL Analysis Executors
+            "SqlInputValidationExecutor" => "Input validation",
+            "SqlParserMafExecutor" => "SQL parsing",
+            "ExecutionPlanMafExecutor" => "Execution plan analysis",
+            "IndexAdvisorMafExecutor" => "Index recommendation",
+            "SqlRewriteMafExecutor" => "SQL rewrite",
+            "SqlCoordinatorMafExecutor" => "Result coordination",
+            "SqlHumanReviewGateExecutor" => "Human review",
+
+            // MAF DB Config Executors
+            "DbConfigInputValidationExecutor" => "Input validation",
+            "ConfigCollectorMafExecutor" => "Config collection",
+            "ConfigAnalyzerMafExecutor" => "Config analysis",
+            "ConfigCoordinatorMafExecutor" => "Config coordination",
+            "ConfigHumanReviewGateExecutor" => "Config review",
+
             _ => executorName
         };
     }
@@ -83,16 +89,22 @@ public static class WorkflowEventPayloadFactory
     {
         return executorName switch
         {
-            "SqlParserExecutor" => "Parsing SQL structure and extracting tables, filters, and query type.",
-            "ExecutionPlanExecutor" => "Collecting execution plan and runtime diagnostics from the target database.",
-            "IndexAdvisorExecutor" => "Inspecting index metadata and generating index recommendations.",
-            "CoordinatorExecutor" => "Combining plan findings, index advice, and evidence into the final report.",
-            "HumanReviewExecutor" => "Creating the manual review task for approval.",
-            "RegenerationExecutor" => "Regenerating the final result from review feedback.",
-            "ConfigCollectorExecutor" => "Collecting database configuration and system metrics.",
-            "ConfigAnalyzerExecutor" => "Analyzing configuration findings against optimization rules.",
-            "ConfigCoordinatorExecutor" => "Combining configuration findings into a single report.",
-            "ConfigReviewExecutor" => "Creating the configuration review task for approval.",
+            // MAF SQL Analysis Executors
+            "SqlInputValidationExecutor" => "Validating SQL input and database connection.",
+            "SqlParserMafExecutor" => "Parsing SQL structure and extracting tables, filters, and query type.",
+            "ExecutionPlanMafExecutor" => "Collecting execution plan and runtime diagnostics from the target database.",
+            "IndexAdvisorMafExecutor" => "Inspecting index metadata and generating index recommendations.",
+            "SqlRewriteMafExecutor" => "Analyzing SQL rewrite opportunities.",
+            "SqlCoordinatorMafExecutor" => "Combining plan findings, index advice, and evidence into the final report.",
+            "SqlHumanReviewGateExecutor" => "Creating the manual review task for approval.",
+
+            // MAF DB Config Executors
+            "DbConfigInputValidationExecutor" => "Validating database configuration input.",
+            "ConfigCollectorMafExecutor" => "Collecting database configuration and system metrics.",
+            "ConfigAnalyzerMafExecutor" => "Analyzing configuration findings against optimization rules.",
+            "ConfigCoordinatorMafExecutor" => "Combining configuration findings into a single report.",
+            "ConfigHumanReviewGateExecutor" => "Creating the configuration review task for approval.",
+
             _ => $"Running {executorName}."
         };
     }
@@ -108,18 +120,18 @@ public static class WorkflowEventPayloadFactory
     {
         return executorName switch
         {
-            "SqlParserExecutor" => new
+            "SqlParserMafExecutor" => new
             {
                 sqlText = TryGetValue<string>(context, WorkflowContextKeys.SqlText),
                 databaseType = TryGetValue<string>(context, WorkflowContextKeys.DatabaseType)
             },
-            "ExecutionPlanExecutor" => new
+            "ExecutionPlanMafExecutor" => new
             {
                 sqlText = TryGetValue<string>(context, WorkflowContextKeys.SqlText),
                 databaseId = TryGetValue<string>(context, WorkflowContextKeys.DatabaseId),
                 databaseType = TryGetValue<string>(context, WorkflowContextKeys.DatabaseType)
             },
-            "IndexAdvisorExecutor" => new
+            "IndexAdvisorMafExecutor" => new
             {
                 parsedTables = TryGetValue<ParsedSqlResult>(context, WorkflowContextKeys.ParsedSql)?
                     .Tables
