@@ -6,6 +6,7 @@ using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
 using DbOptimizer.Infrastructure.Maf.DbConfig;
 using DbOptimizer.Infrastructure.Maf.SqlAnalysis.Executors;
 using DbOptimizer.Infrastructure.Maf.DbConfig.Executors;
+using DbOptimizer.Infrastructure.Maf.Runtime.ErrorHandling;
 
 namespace DbOptimizer.Infrastructure.Maf.Runtime;
 
@@ -19,19 +20,50 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
     private readonly IDbContextFactory<DbOptimizerDbContext> _dbContextFactory;
     private readonly MafWorkflowRuntimeOptions _options;
     private readonly ILogger<MafWorkflowRuntime> _logger;
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly MafGlobalErrorHandler _errorHandler;
+    private readonly RetryPolicy _retryPolicy;
+    private readonly CircuitBreaker _mcpCircuitBreaker;
+    private readonly CircuitBreaker _databaseCircuitBreaker;
 
     public MafWorkflowRuntime(
         IMafWorkflowFactory workflowFactory,
         IMafRunStateStore runStateStore,
         IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
         MafWorkflowRuntimeOptions options,
-        ILogger<MafWorkflowRuntime> logger)
+        ILoggerFactory loggerFactory)
     {
         _workflowFactory = workflowFactory ?? throw new ArgumentNullException(nameof(workflowFactory));
         _runStateStore = runStateStore ?? throw new ArgumentNullException(nameof(runStateStore));
         _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
+        _logger = loggerFactory.CreateLogger<MafWorkflowRuntime>();
+
+        // 初始化错误处理组件
+        _errorHandler = new MafGlobalErrorHandler(
+            _dbContextFactory,
+            _runStateStore,
+            _loggerFactory.CreateLogger<MafGlobalErrorHandler>());
+
+        var retryConfig = new RetryPolicyConfig
+        {
+            MaxRetryAttempts = 3,
+            InitialDelayMs = 100,
+            MaxDelayMs = 5000,
+            BackoffMultiplier = 2.0,
+            EnableJitter = true
+        };
+        _retryPolicy = new RetryPolicy(retryConfig, _loggerFactory.CreateLogger<RetryPolicy>());
+
+        var circuitBreakerConfig = new CircuitBreakerConfig
+        {
+            FailureThreshold = 5,
+            SuccessThreshold = 2,
+            TimeoutMs = 30000
+        };
+        _mcpCircuitBreaker = new CircuitBreaker(circuitBreakerConfig, _loggerFactory.CreateLogger<CircuitBreaker>());
+        _databaseCircuitBreaker = new CircuitBreaker(circuitBreakerConfig, _loggerFactory.CreateLogger<CircuitBreaker>());
     }
 
     public async Task<WorkflowStartResponse> StartSqlAnalysisAsync(
@@ -89,19 +121,32 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             {
                 try
                 {
-                    // MAF Workflow 没有 RunAsync/StartAsync，直接通过第一个 executor 触发
-                    // 实际执行由 MAF 内部的 graph 驱动
                     _logger.LogInformation("Workflow execution started in background. SessionId={SessionId}, RunId={RunId}",
                         command.SessionId, runId);
 
-                    // TODO: 实际的 MAF workflow 执行需要通过 WorkflowHost 或类似机制
-                    // 当前版本先返回 running 状态，实际执行逻辑待 MAF API 确认后补充
+                    // 使用重试策略执行 workflow
+                    await _retryPolicy.ExecuteAsync(
+                        async ct =>
+                        {
+                            // TODO: 实际的 MAF workflow 执行需要通过 WorkflowHost 或类似机制
+                            // 当前版本先返回 running 状态，实际执行逻辑待 MAF API 确认后补充
+                            await Task.CompletedTask;
+                            return true;
+                        },
+                        $"SqlAnalysisWorkflow-{command.SessionId}",
+                        CancellationToken.None);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Workflow execution failed. SessionId={SessionId}, RunId={RunId}",
                         command.SessionId, runId);
-                    await CleanupSessionOnFailureAsync(command.SessionId, ex.Message, CancellationToken.None);
+
+                    // 使用全局错误处理器
+                    await _errorHandler.HandleWorkflowErrorAsync(
+                        command.SessionId,
+                        ex,
+                        currentStep: "workflow_execution",
+                        CancellationToken.None);
                 }
             }, cancellationToken);
 
@@ -122,11 +167,12 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                 "Failed to start SQL analysis workflow. SessionId={SessionId}",
                 command.SessionId);
 
-            // 启动失败时清理 session
-            if (session is not null)
-            {
-                await CleanupSessionOnFailureAsync(session.SessionId, ex.Message, cancellationToken);
-            }
+            // 使用全局错误处理器
+            await _errorHandler.HandleWorkflowErrorAsync(
+                command.SessionId,
+                ex,
+                currentStep: "workflow_start",
+                cancellationToken);
 
             throw;
         }
@@ -184,19 +230,32 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             {
                 try
                 {
-                    // MAF Workflow 没有 RunAsync/StartAsync，直接通过第一个 executor 触发
-                    // 实际执行由 MAF 内部的 graph 驱动
                     _logger.LogInformation("DB config workflow execution started in background. SessionId={SessionId}, RunId={RunId}",
                         command.SessionId, runId);
 
-                    // TODO: 实际的 MAF workflow 执行需要通过 WorkflowHost 或类似机制
-                    // 当前版本先返回 running 状态，实际执行逻辑待 MAF API 确认后补充
+                    // 使用重试策略执行 workflow
+                    await _retryPolicy.ExecuteAsync(
+                        async ct =>
+                        {
+                            // TODO: 实际的 MAF workflow 执行需要通过 WorkflowHost 或类似机制
+                            // 当前版本先返回 running 状态，实际执行逻辑待 MAF API 确认后补充
+                            await Task.CompletedTask;
+                            return true;
+                        },
+                        $"DbConfigWorkflow-{command.SessionId}",
+                        CancellationToken.None);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "DB config workflow execution failed. SessionId={SessionId}, RunId={RunId}",
                         command.SessionId, runId);
-                    await CleanupSessionOnFailureAsync(command.SessionId, ex.Message, CancellationToken.None);
+
+                    // 使用全局错误处理器
+                    await _errorHandler.HandleWorkflowErrorAsync(
+                        command.SessionId,
+                        ex,
+                        currentStep: "workflow_execution",
+                        CancellationToken.None);
                 }
             }, cancellationToken);
 
@@ -217,11 +276,12 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                 "Failed to start DB config workflow. SessionId={SessionId}",
                 command.SessionId);
 
-            // 启动失败时清理 session
-            if (session is not null)
-            {
-                await CleanupSessionOnFailureAsync(session.SessionId, ex.Message, cancellationToken);
-            }
+            // 使用全局错误处理器
+            await _errorHandler.HandleWorkflowErrorAsync(
+                command.SessionId,
+                ex,
+                currentStep: "workflow_start",
+                cancellationToken);
 
             throw;
         }
@@ -298,7 +358,13 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                         "Workflow resume failed. SessionId={SessionId}, RunId={RunId}",
                         sessionId,
                         runState.RunId);
-                    await CleanupSessionOnFailureAsync(sessionId, ex.Message, CancellationToken.None);
+
+                    // 使用全局错误处理器
+                    await _errorHandler.HandleWorkflowErrorAsync(
+                        sessionId,
+                        ex,
+                        currentStep: "workflow_resume",
+                        CancellationToken.None);
                 }
             }, cancellationToken);
 
@@ -393,7 +459,13 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                     _logger.LogError(ex,
                         "SQL workflow resume execution failed. SessionId={SessionId}",
                         reviewResponse.SessionId);
-                    await CleanupSessionOnFailureAsync(reviewResponse.SessionId, ex.Message, CancellationToken.None);
+
+                    // 使用全局错误处理器
+                    await _errorHandler.HandleWorkflowErrorAsync(
+                        reviewResponse.SessionId,
+                        ex,
+                        currentStep: "sql_workflow_resume",
+                        CancellationToken.None);
                 }
             }, cancellationToken);
 
@@ -487,7 +559,13 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                     _logger.LogError(ex,
                         "Config workflow resume execution failed. SessionId={SessionId}",
                         reviewResponse.SessionId);
-                    await CleanupSessionOnFailureAsync(reviewResponse.SessionId, ex.Message, CancellationToken.None);
+
+                    // 使用全局错误处理器
+                    await _errorHandler.HandleWorkflowErrorAsync(
+                        reviewResponse.SessionId,
+                        ex,
+                        currentStep: "config_workflow_resume",
+                        CancellationToken.None);
                 }
             }, cancellationToken);
 
@@ -583,6 +661,14 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                 ex,
                 "Failed to cancel workflow. SessionId={SessionId}",
                 sessionId);
+
+            // 使用全局错误处理器
+            await _errorHandler.HandleWorkflowErrorAsync(
+                sessionId,
+                ex,
+                currentStep: "workflow_cancel",
+                cancellationToken);
+
             throw;
         }
     }
@@ -621,41 +707,5 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             workflowType);
 
         return session;
-    }
-
-    /// <summary>
-    /// 启动失败时清理 session
-    /// </summary>
-    private async Task CleanupSessionOnFailureAsync(
-        Guid sessionId,
-        string errorMessage,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cancellationToken);
-
-            if (session is not null)
-            {
-                session.Status = "failed";
-                session.ErrorMessage = errorMessage;
-                session.UpdatedAt = DateTimeOffset.UtcNow;
-                session.CompletedAt = DateTimeOffset.UtcNow;
-
-                await dbContext.SaveChangesAsync(cancellationToken);
-
-                _logger.LogInformation(
-                    "Cleaned up failed workflow session. SessionId={SessionId}",
-                    sessionId);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "Failed to cleanup workflow session. SessionId={SessionId}",
-                sessionId);
-        }
     }
 }

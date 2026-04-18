@@ -38,14 +38,17 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
         _runStateStoreMock = new Mock<IMafRunStateStore>();
 
         var options = new MafWorkflowRuntimeOptions();
+        var loggerFactoryMock = new Mock<ILoggerFactory>();
         var loggerMock = new Mock<ILogger<MafWorkflowRuntime>>();
+        loggerFactoryMock.Setup(x => x.CreateLogger(It.IsAny<string>()))
+            .Returns(loggerMock.Object);
 
         _runtime = new MafWorkflowRuntime(
             _workflowFactoryMock.Object,
             _runStateStoreMock.Object,
             _dbContextFactoryMock.Object,
             options,
-            loggerMock.Object);
+            loggerFactoryMock.Object);
     }
 
     [Fact]
