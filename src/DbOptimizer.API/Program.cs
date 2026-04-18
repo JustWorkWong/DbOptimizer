@@ -47,6 +47,20 @@ builder.Logging.Configure(options =>
         ActivityTrackingOptions.ParentId;
 });
 
+// 密码安全：过滤包含敏感信息的日志
+builder.Logging.AddFilter((category, level) =>
+{
+    // 过滤包含密码关键字的日志类别
+    if (category != null && (
+        category.Contains("PASSWORD", StringComparison.OrdinalIgnoreCase) ||
+        category.Contains("Secret", StringComparison.OrdinalIgnoreCase) ||
+        category.Contains("Token", StringComparison.OrdinalIgnoreCase)))
+    {
+        return false;
+    }
+    return true;
+});
+
 /* =========================
  * OpenTelemetry 配置
  * - Logs/Metrics/Traces 统一导出到 Aspire Dashboard
