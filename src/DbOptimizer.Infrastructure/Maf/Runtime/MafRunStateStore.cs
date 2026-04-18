@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 using System.Text.Json;
 using DbOptimizer.Infrastructure.Persistence;
+using System.Diagnostics;
 
 namespace DbOptimizer.Infrastructure.Maf.Runtime;
 
@@ -12,6 +13,8 @@ namespace DbOptimizer.Infrastructure.Maf.Runtime;
 /// 1) PostgreSQL 保存权威状态，保证进程重启后可恢复
 /// 2) Redis 保存热点副本，加速读取
 /// 3) Redis 不可用时优先保证 PostgreSQL 落库成功
+/// 4) 使用 Redis pipelining 优化批量操作
+/// 5) 使用 EF Core compiled queries 优化查询性能
 /// </summary>
 public sealed class MafRunStateStore : IMafRunStateStore
 {
@@ -20,6 +23,13 @@ public sealed class MafRunStateStore : IMafRunStateStore
     private readonly ILogger<MafRunStateStore> _logger;
 
     private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(24);
+
+    // Compiled query for better performance
+    private static readonly Func<DbOptimizerDbContext, Guid, Task<WorkflowSessionEntity?>> GetSessionQuery =
+        EF.CompileAsyncQuery((DbOptimizerDbContext ctx, Guid sessionId) =>
+            ctx.WorkflowSessions
+                .AsNoTracking()
+                .FirstOrDefault(x => x.SessionId == sessionId));
 
     public MafRunStateStore(
         IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
@@ -38,6 +48,7 @@ public sealed class MafRunStateStore : IMafRunStateStore
         string engineState,
         CancellationToken cancellationToken = default)
     {
+        var stopwatch = Stopwatch.StartNew();
         var now = DateTime.UtcNow;
 
         // 保存到 PostgreSQL
@@ -56,10 +67,13 @@ public sealed class MafRunStateStore : IMafRunStateStore
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        stopwatch.Stop();
+
         _logger.LogInformation(
-            "Saved MAF run state for session {SessionId}, runId={RunId}",
+            "Saved MAF run state for session {SessionId}, runId={RunId}, dbDuration={Duration}ms",
             sessionId,
-            runId);
+            runId,
+            stopwatch.ElapsedMilliseconds);
 
         // 同步到 Redis（失败不影响主流程）
         await TryCacheStateAsync(sessionId, runId, checkpointRef, engineState, now);
@@ -69,18 +83,23 @@ public sealed class MafRunStateStore : IMafRunStateStore
         Guid sessionId,
         CancellationToken cancellationToken = default)
     {
+        var stopwatch = Stopwatch.StartNew();
+
         // 优先从 Redis 读取
         var cachedState = await TryLoadFromRedisAsync(sessionId);
         if (cachedState is not null)
         {
+            stopwatch.Stop();
+            _logger.LogDebug(
+                "Loaded MAF state from Redis cache for session {SessionId}, duration={Duration}ms",
+                sessionId,
+                stopwatch.ElapsedMilliseconds);
             return cachedState;
         }
 
-        // Redis miss，从 PostgreSQL 读取
+        // Redis miss，从 PostgreSQL 读取（使用 compiled query）
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var session = await dbContext.WorkflowSessions
-            .AsNoTracking()
-            .SingleOrDefaultAsync(x => x.SessionId == sessionId, cancellationToken);
+        var session = await GetSessionQuery(dbContext, sessionId);
 
         if (session is null ||
             string.IsNullOrWhiteSpace(session.EngineRunId) ||
@@ -96,6 +115,13 @@ public sealed class MafRunStateStore : IMafRunStateStore
             session.EngineState ?? "{}",
             session.CreatedAt.UtcDateTime,
             session.UpdatedAt.UtcDateTime);
+
+        stopwatch.Stop();
+
+        _logger.LogInformation(
+            "Loaded MAF state from PostgreSQL for session {SessionId}, duration={Duration}ms",
+            sessionId,
+            stopwatch.ElapsedMilliseconds);
 
         // 回写 Redis
         await TryCacheStateAsync(
@@ -170,6 +196,8 @@ public sealed class MafRunStateStore : IMafRunStateStore
     {
         try
         {
+            var stopwatch = Stopwatch.StartNew();
+
             var state = new MafRunState(
                 sessionId,
                 runId,
@@ -180,10 +208,23 @@ public sealed class MafRunStateStore : IMafRunStateStore
 
             var serialized = JsonSerializer.Serialize(state);
 
-            await _redis.GetDatabase().StringSetAsync(
+            // 使用 Redis pipelining 优化性能
+            var db = _redis.GetDatabase();
+            var batch = db.CreateBatch();
+            var setTask = batch.StringSetAsync(
                 BuildCacheKey(sessionId),
                 serialized,
                 CacheTtl);
+
+            batch.Execute();
+            await setTask;
+
+            stopwatch.Stop();
+
+            _logger.LogDebug(
+                "Cached MAF state to Redis for session {SessionId}, duration={Duration}ms",
+                sessionId,
+                stopwatch.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {

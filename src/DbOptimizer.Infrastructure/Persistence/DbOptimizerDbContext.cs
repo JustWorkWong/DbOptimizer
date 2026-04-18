@@ -72,6 +72,8 @@ public sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext> 
         entity.HasIndex(x => x.CreatedAt).HasDatabaseName("idx_workflow_sessions_created_at_desc").IsDescending(true);
         entity.HasIndex(x => x.WorkflowType).HasDatabaseName("idx_workflow_sessions_workflow_type");
         entity.HasIndex(x => x.ResultType).HasDatabaseName("idx_workflow_sessions_result_type");
+        entity.HasIndex(x => x.EngineRunId).HasDatabaseName("idx_workflow_sessions_engine_run_id");
+        entity.HasIndex(x => new { x.Status, x.CreatedAt }).HasDatabaseName("idx_workflow_sessions_status_created_at");
     }
 
     private static void ConfigureAgentExecutions(ModelBuilder modelBuilder)
@@ -97,6 +99,7 @@ public sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext> 
         entity.HasIndex(x => x.SessionId).HasDatabaseName("idx_agent_executions_session_id");
         entity.HasIndex(x => x.AgentName).HasDatabaseName("idx_agent_executions_agent_name");
         entity.HasIndex(x => x.StartedAt).HasDatabaseName("idx_agent_executions_started_at_desc").IsDescending(true);
+        entity.HasIndex(x => new { x.SessionId, x.StartedAt }).HasDatabaseName("idx_agent_executions_session_started");
 
         entity.HasOne(x => x.Session)
             .WithMany(x => x.AgentExecutions)
@@ -125,6 +128,7 @@ public sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext> 
         entity.HasIndex(x => x.ExecutionId).HasDatabaseName("idx_tool_calls_execution_id");
         entity.HasIndex(x => x.ToolName).HasDatabaseName("idx_tool_calls_tool_name");
         entity.HasIndex(x => x.StartedAt).HasDatabaseName("idx_tool_calls_started_at_desc").IsDescending(true);
+        entity.HasIndex(x => new { x.ExecutionId, x.StartedAt }).HasDatabaseName("idx_tool_calls_execution_started");
 
         entity.HasOne(x => x.Execution)
             .WithMany(x => x.ToolCalls)
@@ -210,6 +214,7 @@ public sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext> 
         entity.HasIndex(x => x.TaskType).HasDatabaseName("idx_review_tasks_task_type");
         entity.HasIndex(x => x.CreatedAt).HasDatabaseName("idx_review_tasks_created_at_desc").IsDescending(true);
         entity.HasIndex(x => x.RequestId).HasDatabaseName("idx_review_tasks_request_id");
+        entity.HasIndex(x => new { x.Status, x.CreatedAt }).HasDatabaseName("idx_review_tasks_status_created");
 
         entity.HasOne(x => x.Session)
             .WithMany(x => x.ReviewTasks)
@@ -303,6 +308,7 @@ public sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext> 
         entity.HasIndex(x => x.DatabaseId).HasDatabaseName("idx_slow_queries_database_id");
         entity.HasIndex(x => x.AvgExecutionTime).HasDatabaseName("idx_slow_queries_avg_time_desc").IsDescending(true);
         entity.HasIndex(x => x.LatestAnalysisSessionId).HasDatabaseName("idx_slow_queries_latest_analysis_session_id");
+        entity.HasIndex(x => new { x.DatabaseId, x.LastSeenAt }).HasDatabaseName("idx_slow_queries_db_last_seen");
     }
 }
 

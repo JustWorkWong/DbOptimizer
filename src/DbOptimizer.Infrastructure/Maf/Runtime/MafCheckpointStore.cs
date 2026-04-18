@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 
@@ -11,6 +12,7 @@ namespace DbOptimizer.Infrastructure.Maf.Runtime;
 /// 2) 支持 runId 到 sessionId 的映射
 /// 3) 自动保存 checkpoint：executor 执行后、review gate 挂起前、错误发生时
 /// 4) 支持 checkpoint 大小限制和保留策略
+/// 5) 使用 GZip 压缩优化序列化性能
 /// </summary>
 public sealed class MafCheckpointStore : IMafCheckpointStore
 {
@@ -20,6 +22,7 @@ public sealed class MafCheckpointStore : IMafCheckpointStore
     // Checkpoint 策略配置
     private const int MaxCheckpointSizeBytes = 10 * 1024 * 1024; // 10MB
     private static readonly TimeSpan CheckpointRetention = TimeSpan.FromDays(7);
+    private const CompressionLevel CompressionLevel = System.IO.Compression.CompressionLevel.Fastest;
 
     public MafCheckpointStore(
         IMafRunStateStore runStateStore,
@@ -39,6 +42,8 @@ public sealed class MafCheckpointStore : IMafCheckpointStore
         ArgumentException.ThrowIfNullOrWhiteSpace(checkpointRef);
         ArgumentNullException.ThrowIfNull(checkpointData);
 
+        var startTime = DateTime.UtcNow;
+
         // 检查 checkpoint 大小限制
         if (checkpointData.Length > MaxCheckpointSizeBytes)
         {
@@ -54,8 +59,12 @@ public sealed class MafCheckpointStore : IMafCheckpointStore
         // 从 runId 提取 sessionId（格式：{sessionId}_{timestamp}）
         var sessionId = ExtractSessionIdFromRunId(runId);
 
-        // 将 checkpoint 数据转换为 JSON 字符串存储
-        var engineState = Convert.ToBase64String(checkpointData);
+        // 压缩 checkpoint 数据
+        var compressedData = CompressData(checkpointData);
+        var compressionRatio = (double)compressedData.Length / checkpointData.Length;
+
+        // 将压缩后的数据转换为 Base64 存储
+        var engineState = Convert.ToBase64String(compressedData);
 
         await _runStateStore.SaveAsync(
             sessionId,
@@ -64,11 +73,18 @@ public sealed class MafCheckpointStore : IMafCheckpointStore
             engineState,
             cancellationToken);
 
+        var duration = DateTime.UtcNow - startTime;
+
         _logger.LogInformation(
-            "Saved checkpoint for runId={RunId}, checkpointRef={CheckpointRef}, size={Size} bytes",
+            "Saved checkpoint for runId={RunId}, checkpointRef={CheckpointRef}, " +
+            "originalSize={OriginalSize} bytes, compressedSize={CompressedSize} bytes, " +
+            "compressionRatio={CompressionRatio:P2}, duration={Duration}ms",
             runId,
             checkpointRef,
-            checkpointData.Length);
+            checkpointData.Length,
+            compressedData.Length,
+            compressionRatio,
+            duration.TotalMilliseconds);
     }
 
     public async Task<byte[]?> LoadCheckpointAsync(
@@ -79,6 +95,7 @@ public sealed class MafCheckpointStore : IMafCheckpointStore
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
         ArgumentException.ThrowIfNullOrWhiteSpace(checkpointRef);
 
+        var startTime = DateTime.UtcNow;
         var sessionId = ExtractSessionIdFromRunId(runId);
 
         var state = await _runStateStore.GetAsync(sessionId, cancellationToken);
@@ -116,13 +133,20 @@ public sealed class MafCheckpointStore : IMafCheckpointStore
 
         try
         {
-            var checkpointData = Convert.FromBase64String(state.EngineState);
+            var compressedData = Convert.FromBase64String(state.EngineState);
+            var checkpointData = DecompressData(compressedData);
+
+            var duration = DateTime.UtcNow - startTime;
 
             _logger.LogInformation(
-                "Loaded checkpoint for runId={RunId}, checkpointRef={CheckpointRef}, size={Size} bytes",
+                "Loaded checkpoint for runId={RunId}, checkpointRef={CheckpointRef}, " +
+                "compressedSize={CompressedSize} bytes, decompressedSize={DecompressedSize} bytes, " +
+                "duration={Duration}ms",
                 runId,
                 checkpointRef,
-                checkpointData.Length);
+                compressedData.Length,
+                checkpointData.Length,
+                duration.TotalMilliseconds);
 
             return checkpointData;
         }
@@ -131,6 +155,14 @@ public sealed class MafCheckpointStore : IMafCheckpointStore
             _logger.LogError(
                 ex,
                 "Failed to decode checkpoint data for runId={RunId}",
+                runId);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to decompress checkpoint data for runId={RunId}",
                 runId);
             return null;
         }
@@ -164,5 +196,30 @@ public sealed class MafCheckpointStore : IMafCheckpointStore
         }
 
         return sessionId;
+    }
+
+    /// <summary>
+    /// 使用 GZip 压缩数据
+    /// </summary>
+    private static byte[] CompressData(byte[] data)
+    {
+        using var outputStream = new MemoryStream();
+        using (var gzipStream = new GZipStream(outputStream, CompressionLevel))
+        {
+            gzipStream.Write(data, 0, data.Length);
+        }
+        return outputStream.ToArray();
+    }
+
+    /// <summary>
+    /// 解压 GZip 数据
+    /// </summary>
+    private static byte[] DecompressData(byte[] compressedData)
+    {
+        using var inputStream = new MemoryStream(compressedData);
+        using var gzipStream = new GZipStream(inputStream, CompressionMode.Decompress);
+        using var outputStream = new MemoryStream();
+        gzipStream.CopyTo(outputStream);
+        return outputStream.ToArray();
     }
 }
