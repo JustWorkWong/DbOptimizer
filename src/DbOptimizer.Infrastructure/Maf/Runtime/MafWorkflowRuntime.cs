@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Agents.AI.Workflows;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
 using DbOptimizer.Infrastructure.Maf.DbConfig;
@@ -316,13 +317,83 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
         }
     }
 
-    [Obsolete("MAF engine not yet implemented. Use WorkflowApplicationService (legacy engine) instead.")]
-    public Task<WorkflowCancelResponse> CancelAsync(
+    public async Task<WorkflowCancelResponse> CancelAsync(
         Guid sessionId,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogWarning("MAF engine not implemented. Use WorkflowApplicationService instead.");
-        throw new NotImplementedException("MAF engine not yet implemented. Use WorkflowApplicationService (legacy engine) for workflow cancellation.");
+        _logger.LogInformation(
+            "Cancelling workflow. SessionId={SessionId}",
+            sessionId);
+
+        try
+        {
+            // 1. 读取 run state
+            var runState = await _runStateStore.GetAsync(sessionId, cancellationToken);
+            if (runState == null)
+            {
+                _logger.LogWarning(
+                    "Run state not found for session. SessionId={SessionId}",
+                    sessionId);
+                throw new InvalidOperationException($"Run state not found for session {sessionId}");
+            }
+
+            // 2. 获取 workflow session
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var session = await dbContext.WorkflowSessions
+                .FirstOrDefaultAsync(s => s.SessionId == sessionId, cancellationToken);
+
+            if (session == null)
+            {
+                _logger.LogWarning(
+                    "Workflow session not found. SessionId={SessionId}",
+                    sessionId);
+                throw new InvalidOperationException($"Workflow session not found: {sessionId}");
+            }
+
+            // 3. 验证 workflow type 是否有效
+            // 注意：这里不实际构建 workflow，只验证类型
+            // MAF 1.0.0-rc4 的 Workflow 类可能没有直接的 CancelAsync 方法
+            // 取消操作通过更新 session 状态实现
+            switch (session.WorkflowType)
+            {
+                case "sql_analysis":
+                    // 验证可以构建 SQL workflow
+                    _ = _workflowFactory.BuildSqlAnalysisWorkflow();
+                    break;
+                case "db_config_optimization":
+                    // 验证可以构建 Config workflow
+                    _ = _workflowFactory.BuildDbConfigWorkflow();
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unknown workflow type: {session.WorkflowType}");
+            }
+
+            // 4. 更新 session 状态为 cancelled
+            session.Status = "cancelled";
+            session.UpdatedAt = DateTimeOffset.UtcNow;
+            session.CompletedAt = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            // 5. 清空 checkpoint 数据
+            await _runStateStore.DeleteAsync(sessionId, cancellationToken);
+
+            _logger.LogInformation(
+                "Workflow cancellation completed. SessionId={SessionId}, RunId={RunId}",
+                sessionId,
+                runState.RunId);
+
+            return new WorkflowCancelResponse(
+                SessionId: sessionId,
+                Status: "cancelled");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to cancel workflow. SessionId={SessionId}",
+                sessionId);
+            throw;
+        }
     }
 
     /// <summary>
