@@ -1,5 +1,11 @@
 # SQL Analysis Workflow Design
 
+## 实施状态
+
+**✅ 已实现** (2026-04-18)
+
+基于 MAF 1.0.0-rc4 完整实现。
+
 ## Workflow 目标
 
 输入一条 SQL 与数据库上下文，输出：

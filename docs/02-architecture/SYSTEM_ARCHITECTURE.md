@@ -16,9 +16,11 @@
 
 ## Current State
 
-当前系统仍保留旧 `WorkflowRunner + IWorkflowExecutor` 路径，SQL workflow 和配置 workflow 处于半成品状态。
+**✅ 已完成** (2026-04-18)
 
-## Target State
+系统已完全迁移到 MAF，Legacy engine 已移除。
+
+## Architecture State
 
 ### Architecture Summary
 

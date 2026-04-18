@@ -4,19 +4,27 @@
 
 记录当前还没做完的事情，作为后续 AI 排期和派发依据。
 
-## Status Update (2026-04-17)
+## Status Update (2026-04-18)
 
+- ✅ MAF 迁移已完成（TASK-MAF-1 至 TASK-MAF-15）
 - ✅ TASK-A1 已完成（统一结果壳）
 - 🔄 TASK-A2 至 TASK-G1 待执行
 
+## Completed In Code
+
+1. ✅ 已引入 `Microsoft.Agents.AI.Workflows 1.0.0-rc4`。
+2. ✅ SQL workflow 已迁移到 MAF。
+3. ✅ 配置调优 workflow 已迁移到 MAF。
+4. ✅ Checkpoint 自动保存与恢复。
+5. ✅ Review 流程集成 MAF Request/Response。
+6. ✅ 事件投影与 SSE 推送。
+7. ✅ Legacy engine 完全移除。
+
 ## Pending In Code
 
-1. 还未真正引入 `Microsoft.Agents.AI.Workflows 1.0.0-rc4`。
-2. 还未把 SQL workflow 迁移到 MAF。
-3. 还未把配置调优 workflow 迁移到 MAF。
-4. 还未打通 slow query 自动提交 workflow。
-5. 还未实现 dashboard trend / alerts。
-6. 还未打通 PromptVersion API 与 UI。
+1. 还未打通 slow query 自动提交 workflow。
+2. 还未实现 dashboard trend / alerts。
+3. 还未打通 PromptVersion API 与 UI。
 
 ## Pending In Frontend
 

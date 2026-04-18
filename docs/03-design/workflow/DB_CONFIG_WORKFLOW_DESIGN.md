@@ -1,5 +1,11 @@
 # DB Config Workflow Design
 
+## 实施状态
+
+**✅ 已实现** (2026-04-18)
+
+基于 MAF 1.0.0-rc4 完整实现。
+
 ## Workflow 目标
 
 对数据库实例配置做一条完整闭环：

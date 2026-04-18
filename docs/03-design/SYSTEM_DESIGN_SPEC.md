@@ -13,11 +13,13 @@
 3. 前端页面与组件设计
 4. 数据模型
 
-## Current State
+## Implementation Status
 
-设计已经拆分，但需要一个标准入口，避免 AI 直接从单篇细节文档开始导致遗漏。
+**✅ MAF 迁移已完成** (2026-04-18)
 
-## Target State
+所有 workflow 设计已基于 MAF 实现。
+
+## Design Structure
 
 ### API Design
 

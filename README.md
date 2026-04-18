@@ -8,17 +8,18 @@
 
 ## 核心特性
 
-### 🤖 多 Agent 协作分析
-- **SQL 层调优**：SQL 解析 + 执行计划分析 + 索引推荐
+### 🤖 MAF 驱动的多 Agent 协作
+- **SQL 层调优**：SQL 解析 + 执行计划分析 + 索引推荐 + SQL 重写
 - **数据库层调优**：参数配置 + 资源分析 + 负载特征
 - **人工审核**：所有 AI 建议必须人工审核，驳回后回流重跑
 - **置信度 + 证据链**：每个建议都带置信度、原因、证据引用
+- **Workflow Checkpoint**：支持暂停/恢复，断点续跑
 
 ### 🔍 透明化 AI 过程
 - 实时显示 Agent 工作过程（SSE 推送）
 - 展示工具调用（Function Calling）
 - 展示 AI 决策推理链
-- 完整的执行记录 + Workflow checkpoint
+- 完整的执行记录 + MAF Checkpoint 持久化
 
 ### 📊 慢查询分析
 - 手工输入 SQL 分析
@@ -175,15 +176,16 @@ WHERE u.created_at > '2024-01-01'
 
 ## 开发路线图
 
-### Phase 1: 核心功能（第一版）🚧
-- [ ] Aspire 编排 + 基础架构
-- [ ] MySQL & PostgreSQL MCP 接入
-- [ ] SQL 调优工作流（手工输入 + 慢 SQL 自动抓取）
-- [ ] 数据库层调优工作流
-- [ ] 人工审核 + 驳回回流
-- [ ] Agent 持久化 + Workflow checkpoint
-- [ ] 历史任务与版本查看
-- [ ] Vue 3 前端 + SSE 实时推送
+### Phase 1: 核心功能（第一版）✅
+- [x] Aspire 编排 + 基础架构
+- [x] MySQL & PostgreSQL MCP 接入
+- [x] SQL 调优工作流（基于 MAF）
+- [x] 数据库层调优工作流（基于 MAF）
+- [x] 人工审核 + 驳回回流（MAF Request/Response）
+- [x] Agent 持久化 + MAF Workflow checkpoint
+- [x] 历史任务与版本查看
+- [x] Vue 3 前端 + SSE 实时推送
+- [ ] 慢 SQL 自动抓取与分析
 
 ### Phase 2: 增强功能 📅
 - [ ] 上下文压缩 / 摘要
