@@ -192,16 +192,6 @@ builder.Services.AddSingleton<IConfigRuleEngine, ConfigRuleEngine>();
 builder.Services.AddSingleton<IReviewTaskService, ReviewTaskService>();
 builder.Services.AddSingleton<IConfigReviewTaskService, ConfigReviewTaskService>();
 builder.Services.AddSingleton<IPromptVersionService, PromptVersionService>();
-builder.Services.AddSingleton<IWorkflowExecutor, SqlParserExecutor>();
-builder.Services.AddSingleton<IWorkflowExecutor, ExecutionPlanExecutor>();
-builder.Services.AddSingleton<IWorkflowExecutor, IndexAdvisorExecutor>();
-builder.Services.AddSingleton<IWorkflowExecutor, CoordinatorExecutor>();
-builder.Services.AddSingleton<IWorkflowExecutor, HumanReviewExecutor>();
-builder.Services.AddSingleton<IWorkflowExecutor, RegenerationExecutor>();
-builder.Services.AddSingleton<IWorkflowExecutor, ConfigCollectorExecutor>();
-builder.Services.AddSingleton<IWorkflowExecutor, ConfigAnalyzerExecutor>();
-builder.Services.AddSingleton<IWorkflowExecutor, ConfigCoordinatorExecutor>();
-builder.Services.AddSingleton<IWorkflowExecutor, ConfigReviewExecutor>();
 
 // MAF SQL Analysis Executors
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Maf.SqlAnalysis.ISqlRewriteAdvisor, DbOptimizer.Infrastructure.Maf.SqlAnalysis.NoOpSqlRewriteAdvisor>();

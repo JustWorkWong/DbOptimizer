@@ -6,18 +6,9 @@ namespace DbOptimizer.Infrastructure.Workflows.Events;
 /// </summary>
 public sealed class WorkflowProgressCalculator : IWorkflowProgressCalculator
 {
-    // MAF executor 命名映射（支持 Legacy 和 MAF 两种命名）
+    // MAF executor 命名映射
     private static readonly Dictionary<string, int> SqlAnalysisSteps = new()
     {
-        // Legacy executors
-        ["SqlParserExecutor"] = 1,
-        ["ExecutionPlanExecutor"] = 2,
-        ["IndexAdvisorExecutor"] = 3,
-        ["CoordinatorExecutor"] = 4,
-        ["HumanReviewExecutor"] = 5,
-        ["RegenerationExecutor"] = 6,
-
-        // MAF executors
         ["SqlInputValidationExecutor"] = 0,
         ["SqlParserMafExecutor"] = 1,
         ["ExecutionPlanMafExecutor"] = 2,
@@ -29,13 +20,6 @@ public sealed class WorkflowProgressCalculator : IWorkflowProgressCalculator
 
     private static readonly Dictionary<string, int> DbConfigOptimizationSteps = new()
     {
-        // Legacy executors
-        ["ConfigCollectorExecutor"] = 1,
-        ["ConfigAnalyzerExecutor"] = 2,
-        ["ConfigCoordinatorExecutor"] = 3,
-        ["ConfigReviewExecutor"] = 4,
-
-        // MAF executors
         ["DbConfigInputValidationExecutor"] = 0,
         ["ConfigCollectorMafExecutor"] = 1,
         ["ConfigAnalyzerMafExecutor"] = 2,

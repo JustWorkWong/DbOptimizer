@@ -1,15 +1,11 @@
-using DbOptimizer.Core.Models;
 using DbOptimizer.Infrastructure.Checkpointing;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
-public interface IWorkflowExecutor
-{
-    string Name { get; }
-
-    Task<WorkflowExecutorResult> ExecuteAsync(WorkflowContext context, CancellationToken cancellationToken = default);
-}
-
+/// <summary>
+/// Legacy workflow executor result type
+/// Used by WorkflowExecutionAuditService and WorkflowEventPayloadFactory
+/// </summary>
 public sealed record WorkflowExecutorResult(
     bool IsSuccess,
     WorkflowCheckpointStatus NextStatus,
@@ -36,11 +32,3 @@ public sealed record WorkflowExecutorResult(
         return new WorkflowExecutorResult(false, WorkflowCheckpointStatus.Failed, output, errorMessage);
     }
 }
-
-public sealed record WorkflowRunResult(
-    Guid SessionId,
-    WorkflowCheckpointStatus Status,
-    string CurrentExecutor,
-    IReadOnlyCollection<string> CompletedExecutors,
-    int CheckpointVersion,
-    string? ErrorMessage);
