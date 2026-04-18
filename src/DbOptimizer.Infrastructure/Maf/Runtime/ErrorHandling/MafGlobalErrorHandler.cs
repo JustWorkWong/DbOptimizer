@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using DbOptimizer.Infrastructure.Persistence;
+using System.Text.Json;
 
 namespace DbOptimizer.Infrastructure.Maf.Runtime.ErrorHandling;
 
@@ -54,6 +55,21 @@ public sealed class MafGlobalErrorHandler
                 exception,
                 currentStep,
                 category,
+                cancellationToken);
+
+            // 3. 记录错误到 error_logs 表
+            await RecordWorkflowErrorAsync(
+                sessionId,
+                category.ToString(),
+                userMessage,
+                exception.StackTrace,
+                new
+                {
+                    currentStep,
+                    errorCategory = category.ToString(),
+                    exceptionType = exception.GetType().FullName,
+                    innerException = exception.InnerException?.Message
+                },
                 cancellationToken);
 
             _logger.LogInformation(
@@ -195,32 +211,89 @@ public sealed class MafGlobalErrorHandler
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-            var errorRecord = new
+            var contextData = new
             {
-                sessionId,
                 executorName,
                 errorCategory = category.ToString(),
                 exceptionType = exception.GetType().FullName,
-                exceptionMessage = exception.Message,
-                stackTrace = exception.StackTrace,
+                innerException = exception.InnerException?.Message,
                 timestamp = DateTimeOffset.UtcNow
             };
 
-            // 这里可以扩展为专门的 executor_errors 表
-            // 目前先记录到日志
+            var errorLog = new ErrorLogEntity
+            {
+                LogId = Guid.NewGuid(),
+                SessionId = sessionId,
+                ExecutionId = null,
+                ErrorType = $"executor_{category.ToString().ToLowerInvariant()}",
+                ErrorMessage = exception.Message,
+                StackTrace = exception.StackTrace,
+                Context = JsonSerializer.Serialize(contextData),
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            dbContext.ErrorLogs.Add(errorLog);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
             _logger.LogInformation(
-                "Executor error recorded. SessionId={SessionId}, Executor={Executor}, ErrorCategory={Category}",
+                "Executor error persisted to database. SessionId={SessionId}, Executor={Executor}, ErrorCategory={Category}, LogId={LogId}",
                 sessionId,
                 executorName,
-                category);
+                category,
+                errorLog.LogId);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 ex,
-                "Failed to record executor error. SessionId={SessionId}, Executor={Executor}",
+                "Failed to persist executor error to database. SessionId={SessionId}, Executor={Executor}",
                 sessionId,
                 executorName);
+        }
+    }
+
+    /// <summary>
+    /// 记录 workflow 级别错误到 error_logs 表
+    /// </summary>
+    private async Task RecordWorkflowErrorAsync(
+        Guid sessionId,
+        string errorType,
+        string errorMessage,
+        string? stackTrace,
+        object? context,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+            var errorLog = new ErrorLogEntity
+            {
+                LogId = Guid.NewGuid(),
+                SessionId = sessionId,
+                ExecutionId = null,
+                ErrorType = $"workflow_{errorType.ToLowerInvariant()}",
+                ErrorMessage = errorMessage,
+                StackTrace = stackTrace,
+                Context = context != null ? JsonSerializer.Serialize(context) : null,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            dbContext.ErrorLogs.Add(errorLog);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "Workflow error persisted to database. SessionId={SessionId}, ErrorType={ErrorType}, LogId={LogId}",
+                sessionId,
+                errorType,
+                errorLog.LogId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to persist workflow error to database. SessionId={SessionId}",
+                sessionId);
         }
     }
 }
