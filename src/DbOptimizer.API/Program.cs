@@ -132,9 +132,6 @@ builder.Services.AddSingleton<ICheckpointStorage, PostgresRedisCheckpointStorage
 builder.Services.AddSingleton<WorkflowEventHub>();
 builder.Services.AddSingleton<IWorkflowEventPublisher>(serviceProvider => serviceProvider.GetRequiredService<WorkflowEventHub>());
 builder.Services.AddSingleton<IWorkflowEventQueryService>(serviceProvider => serviceProvider.GetRequiredService<WorkflowEventHub>());
-builder.Services.AddSingleton<IWorkflowStateMachine, WorkflowStateMachine>();
-builder.Services.AddSingleton<IWorkflowExecutionAuditService, WorkflowExecutionAuditService>();
-builder.Services.AddSingleton<IWorkflowRunner, WorkflowRunner>();
 builder.Services.AddSingleton<IWorkflowResultSerializer, WorkflowResultSerializer>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Application.IWorkflowApplicationService, DbOptimizer.Infrastructure.Workflows.Application.WorkflowApplicationService>();
 builder.Services.AddSingleton<IReviewApplicationService, ReviewApplicationService>();
@@ -154,7 +151,7 @@ builder.Services.AddSingleton(workflowRuntimeOptions);
 builder.Services.AddSingleton(configCollectionOptions);
 builder.Services.AddSingleton(slowQueryCollectionOptions);
 
-// MAF Workflow Runtime 服务注册（新增，与旧 runner 并行）
+// MAF Workflow Runtime 服务注册
 builder.Services.AddSingleton(mafWorkflowRuntimeOptions);
 builder.Services.AddSingleton<IMafWorkflowFactory, MafWorkflowFactory>();
 builder.Services.AddSingleton<IMafWorkflowRuntime, MafWorkflowRuntime>();
