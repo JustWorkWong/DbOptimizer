@@ -118,7 +118,8 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
 
             // 6. 异步执行 workflow（fire-and-forget，实际执行在后台进行）
             // MAF Workflow 通过 executor chain 同步执行，这里包装为异步
-            _ = Task.Run(async () =>
+#pragma warning disable CS4014 // Fire-and-forget is intentional
+            Task.Run(async () =>
             {
                 try
                 {
@@ -147,7 +148,17 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                         currentStep: "workflow_execution",
                         CancellationToken.None);
                 }
-            }, cancellationToken);
+            }, CancellationToken.None)
+            .ContinueWith(task =>
+            {
+                if (task.IsFaulted)
+                {
+                    _logger.LogCritical(task.Exception,
+                        "Unhandled exception in background SQL workflow task. SessionId={SessionId}, RunId={RunId}",
+                        command.SessionId, runId);
+                }
+            }, TaskScheduler.Default);
+#pragma warning restore CS4014
 
             _logger.LogInformation(
                 "SQL analysis workflow started successfully. SessionId={SessionId}, RunId={RunId}",
@@ -225,7 +236,8 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
 
             // 6. 异步执行 workflow（fire-and-forget，实际执行在后台进行）
             // MAF Workflow 通过 executor chain 同步执行，这里包装为异步
-            _ = Task.Run(async () =>
+#pragma warning disable CS4014 // Fire-and-forget is intentional
+            Task.Run(async () =>
             {
                 try
                 {
@@ -254,7 +266,17 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                         currentStep: "workflow_execution",
                         CancellationToken.None);
                 }
-            }, cancellationToken);
+            }, CancellationToken.None)
+            .ContinueWith(task =>
+            {
+                if (task.IsFaulted)
+                {
+                    _logger.LogCritical(task.Exception,
+                        "Unhandled exception in background DB config workflow task. SessionId={SessionId}, RunId={RunId}",
+                        command.SessionId, runId);
+                }
+            }, TaskScheduler.Default);
+#pragma warning restore CS4014
 
             _logger.LogInformation(
                 "DB config workflow started successfully. SessionId={SessionId}, RunId={RunId}",
@@ -337,7 +359,8 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             // 5. 异步恢复 workflow 执行（fire-and-forget）
             // 注意：实际恢复需要通过 ResumeSqlWorkflowAsync 或 ResumeConfigWorkflowAsync
             // 传递 ReviewDecisionResponseMessage
-            _ = Task.Run(async () =>
+#pragma warning disable CS4014 // Fire-and-forget is intentional
+            Task.Run(async () =>
             {
                 try
                 {
@@ -366,7 +389,17 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                         currentStep: "workflow_resume",
                         CancellationToken.None);
                 }
-            }, cancellationToken);
+            }, CancellationToken.None)
+            .ContinueWith(task =>
+            {
+                if (task.IsFaulted)
+                {
+                    _logger.LogCritical(task.Exception,
+                        "Unhandled exception in background workflow resume task. SessionId={SessionId}, RunId={RunId}",
+                        sessionId, runState.RunId);
+                }
+            }, TaskScheduler.Default);
+#pragma warning restore CS4014
 
             _logger.LogInformation(
                 "Workflow resumed successfully. SessionId={SessionId}, RunId={RunId}",
@@ -443,7 +476,8 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             }
 
             // 4. 异步恢复 workflow 执行
-            _ = Task.Run(async () =>
+#pragma warning disable CS4014 // Fire-and-forget is intentional
+            Task.Run(async () =>
             {
                 try
                 {
@@ -480,7 +514,17 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                         currentStep: "sql_workflow_resume",
                         CancellationToken.None);
                 }
-            }, cancellationToken);
+            }, CancellationToken.None)
+            .ContinueWith(task =>
+            {
+                if (task.IsFaulted)
+                {
+                    _logger.LogCritical(task.Exception,
+                        "Unhandled exception in background SQL workflow resume task. SessionId={SessionId}",
+                        reviewResponse.SessionId);
+                }
+            }, TaskScheduler.Default);
+#pragma warning restore CS4014
 
             _logger.LogInformation(
                 "SQL workflow resumed successfully. SessionId={SessionId}",
@@ -556,7 +600,8 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             }
 
             // 4. 异步恢复 workflow 执行
-            _ = Task.Run(async () =>
+#pragma warning disable CS4014 // Fire-and-forget is intentional
+            Task.Run(async () =>
             {
                 try
                 {
@@ -593,7 +638,17 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                         currentStep: "config_workflow_resume",
                         CancellationToken.None);
                 }
-            }, cancellationToken);
+            }, CancellationToken.None)
+            .ContinueWith(task =>
+            {
+                if (task.IsFaulted)
+                {
+                    _logger.LogCritical(task.Exception,
+                        "Unhandled exception in background Config workflow resume task. SessionId={SessionId}",
+                        reviewResponse.SessionId);
+                }
+            }, TaskScheduler.Default);
+#pragma warning restore CS4014
 
             _logger.LogInformation(
                 "Config workflow resumed successfully. SessionId={SessionId}",
