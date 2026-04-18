@@ -193,15 +193,15 @@ Task.Run(async () =>
 #### 修复步骤
 
 1. **验证 Aspire secret 机制**（1小时）
-   - [ ] 启动 Aspire Dashboard
-   - [ ] 检查环境变量是否被掩码显示
-   - [ ] 检查容器日志是否包含明文密码
-   - [ ] 查看 Aspire 文档确认 `secret: true` 的行为
+   - [x] 启动 Aspire Dashboard
+   - [x] 检查环境变量是否被掩码显示
+   - [x] 检查容器日志是否包含明文密码
+   - [x] 查看 Aspire 文档确认 `secret: true` 的行为
 
 2. **添加日志过滤规则**（1小时）
-   - [ ] 在 `Program.cs` 中配置日志过滤
-   - [ ] 过滤包含 "PASSWORD" 的日志行
-   - [ ] 添加单元测试验证过滤规则
+   - [x] 在 `Program.cs` 中配置日志过滤
+   - [x] 过滤包含 "PASSWORD" 的日志行
+   - [x] 添加单元测试验证过滤规则
 
 #### 修复代码（如果需要）
 
@@ -222,10 +222,29 @@ builder.Logging.AddConsole(options =>
 
 #### 验证标准
 
-- [ ] Aspire Dashboard 不显示明文密码
-- [ ] 容器日志不包含明文密码
-- [ ] 应用日志不包含明文密码
-- [ ] 文档中记录密码管理最佳实践
+- [x] Aspire Dashboard 不显示明文密码
+- [x] 容器日志不包含明文密码
+- [x] 应用日志不包含明文密码
+- [x] 文档中记录密码管理最佳实践
+
+#### 完成情况
+
+**状态**: ✅ 已完成  
+**提交**: fdd217f  
+**日期**: 2026-04-18
+
+**修复内容**:
+1. 修复 `AppHost.cs` 中的密码泄露问题
+   - 第 34 行：使用 `postgresPassword` 参数引用替代明文 `postgresPasswordValue`
+   - 第 46 行：使用 `mySqlPassword` 参数引用替代明文 `mySqlPasswordValue`
+2. 在 `Program.cs` 添加日志过滤规则，过滤 PASSWORD/Secret/Token 关键字
+3. 创建 `PASSWORD_SECURITY.md` 文档，记录密码管理最佳实践
+
+**验证结果**:
+- ✅ Aspire 使用 `AddParameter(..., secret: true)` 确保 Dashboard 显示 `***`
+- ✅ 环境变量通过参数引用机制传递，不泄露明文
+- ✅ 应用日志过滤敏感关键字
+- ✅ 文档覆盖开发、部署、运行时各阶段的安全检查清单
 
 ---
 
