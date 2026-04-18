@@ -3,74 +3,20 @@ using DbOptimizer.Core.Models;
 using DbOptimizer.Infrastructure.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
-using DbOptimizer.Infrastructure.SlowQuery;
 using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.API.Api;
 
-internal static class DashboardAndHistoryApiRouteBuilderExtensions
+internal static class HistoryApiRouteBuilderExtensions
 {
-    public static IEndpointRouteBuilder MapDashboardAndHistoryApi(this IEndpointRouteBuilder endpoints)
+    public static IEndpointRouteBuilder MapHistoryApi(this IEndpointRouteBuilder endpoints)
     {
-        endpoints.MapGet("/api/dashboard/stats", HandleGetDashboardStatsAsync);
-        endpoints.MapGet("/api/dashboard/slow-query-trends", HandleGetSlowQueryTrendsAsync);
-        endpoints.MapGet("/api/dashboard/slow-query-alerts", HandleGetSlowQueryAlertsAsync);
-
         var historyGroup = endpoints.MapGroup("/api/history");
         historyGroup.MapGet(string.Empty, HandleGetHistoryListAsync);
         historyGroup.MapGet("/{sessionId:guid}", HandleGetHistoryDetailAsync);
         historyGroup.MapGet("/{sessionId:guid}/replay", HandleGetHistoryReplayAsync);
 
         return endpoints;
-    }
-
-    private static async Task<IResult> HandleGetDashboardStatsAsync(
-        IHistoryQueryService historyQueryService,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        var response = await historyQueryService.GetDashboardStatsAsync(cancellationToken);
-        return ApiEnvelopeFactory.Success(httpContext, response);
-    }
-
-    private static async Task<IResult> HandleGetSlowQueryTrendsAsync(
-        string? databaseId,
-        int? days,
-        ISlowQueryDashboardQueryService slowQueryService,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrEmpty(databaseId))
-        {
-            return ApiEnvelopeFactory.Failure(
-                httpContext,
-                StatusCodes.Status400BadRequest,
-                "INVALID_PARAMETER",
-                "databaseId is required.",
-                null);
-        }
-
-        var response = await slowQueryService.GetTrendAsync(
-            databaseId,
-            days ?? 7,
-            cancellationToken);
-
-        return ApiEnvelopeFactory.Success(httpContext, response);
-    }
-
-    private static async Task<IResult> HandleGetSlowQueryAlertsAsync(
-        string? databaseId,
-        string? status,
-        ISlowQueryDashboardQueryService slowQueryService,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        var response = await slowQueryService.GetAlertsAsync(
-            databaseId,
-            status,
-            cancellationToken);
-
-        return ApiEnvelopeFactory.Success(httpContext, response);
     }
 
     private static async Task<IResult> HandleGetHistoryListAsync(

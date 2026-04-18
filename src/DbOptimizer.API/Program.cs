@@ -7,6 +7,7 @@ using DbOptimizer.Infrastructure.SlowQuery;
 using DbOptimizer.Infrastructure.Maf.Runtime;
 using DbOptimizer.Infrastructure.Mcp;
 using DbOptimizer.Infrastructure.Prompts;
+using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using StackExchange.Redis;
 using Microsoft.OpenApi.Models;
@@ -157,7 +158,6 @@ builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Events.IWorkf
 builder.Services.AddSingleton(Microsoft.Extensions.Options.Options.Create(tokenUsageRecorderOptions));
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Monitoring.ITokenUsageRecorder, DbOptimizer.Infrastructure.Workflows.Monitoring.TokenUsageRecorder>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Projection.IWorkflowProjectionWriter, DbOptimizer.Infrastructure.Workflows.Projection.WorkflowProjectionWriter>();
-builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.ISqlParser, DbOptimizer.Infrastructure.Workflows.LightweightSqlParser>();
 builder.Services.AddSingleton<DbOptimizer.Core.Models.ISqlParser, DbOptimizer.Core.Models.LightweightSqlParser>();
 builder.Services.AddSingleton(workflowExecutionPlanOptions);
 builder.Services.AddSingleton(slowQueryExecutionPlanOptions);
@@ -198,6 +198,9 @@ builder.Services.AddSingleton<ITableIndexMetadataAnalyzer, TableIndexMetadataAna
 builder.Services.AddSingleton<IIndexRecommendationGenerator, IndexRecommendationGenerator>();
 builder.Services.AddSingleton<IConfigCollectionProvider, ConfigCollectionProvider>();
 builder.Services.AddSingleton<IConfigRule, MySqlBufferPoolRule>();
+
+// FluentValidation 验证器注册
+builder.Services.AddValidatorsFromAssemblyContaining<DbOptimizer.Infrastructure.Workflows.Application.Validators.CreateSqlAnalysisWorkflowRequestValidator>();
 builder.Services.AddSingleton<IConfigRule, MySqlMaxConnectionsRule>();
 builder.Services.AddSingleton<IConfigRule, PostgreSqlSharedBuffersRule>();
 builder.Services.AddSingleton<IConfigRule, PostgreSqlWorkMemRule>();
@@ -302,7 +305,8 @@ app.MapGet("/debug/connections", (IConfiguration config) =>
 
 app.MapWorkflowApi();
 app.MapReviewApi();
-app.MapDashboardAndHistoryApi();
+app.MapDashboardApi();
+app.MapHistoryApi();
 app.MapSlowQueryApi();
 app.MapWorkflowEventsApi();
 app.MapPromptVersionApi();

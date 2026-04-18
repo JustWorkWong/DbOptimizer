@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.Logging;
+using DbOptimizer.Core.Models;
 using DbOptimizer.Infrastructure.Workflows;
 
 namespace DbOptimizer.Infrastructure.Maf.SqlAnalysis.Executors;
