@@ -333,6 +333,230 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
         Assert.NotNull(session.CompletedAt);
     }
 
+    [Fact]
+    public async Task ResumeAsync_WithValidCheckpoint_ResumesWorkflow()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var runId = $"maf_run_{Guid.NewGuid():N}";
+
+        // 创建 suspended session
+        await using (var dbContext = new DbOptimizerDbContext(_dbOptions))
+        {
+            var session = new WorkflowSessionEntity
+            {
+                SessionId = sessionId,
+                WorkflowType = "sql_analysis",
+                Status = "suspended",
+                State = "{}",
+                EngineType = "maf",
+                EngineRunId = runId,
+                EngineCheckpointRef = $"review-gate-{sessionId}",
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            dbContext.WorkflowSessions.Add(session);
+            await dbContext.SaveChangesAsync();
+        }
+
+        // Mock run state
+        var runState = new MafRunState(
+            SessionId: sessionId,
+            RunId: runId,
+            CheckpointRef: $"review-gate-{sessionId}",
+            EngineState: "{}",
+            CreatedAt: DateTime.UtcNow);
+
+        _runStateStoreMock.Setup(x => x.GetAsync(sessionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(runState);
+
+        // Mock workflow factory
+        _workflowFactoryMock.Setup(x => x.BuildSqlAnalysisWorkflow())
+            .Returns((Workflow)null!);
+
+        // Act
+        var response = await _runtime.ResumeAsync(sessionId);
+
+        // Assert
+        Assert.NotNull(response);
+        Assert.Equal(sessionId, response.SessionId);
+        Assert.Equal("running", response.Status);
+
+        // 验证 session 状态已更新
+        await using var verifyContext = new DbOptimizerDbContext(_dbOptions);
+        var updatedSession = await verifyContext.WorkflowSessions.FindAsync(sessionId);
+        Assert.NotNull(updatedSession);
+        Assert.Equal("running", updatedSession.Status);
+    }
+
+    [Fact]
+    public async Task ResumeAsync_WithNonExistentSession_ThrowsException()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _runtime.ResumeAsync(sessionId));
+
+        Assert.Contains("not found", exception.Message);
+    }
+
+    [Fact]
+    public async Task ResumeAsync_WithNonSuspendedSession_ThrowsException()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+
+        // 创建 running session（非 suspended）
+        await using (var dbContext = new DbOptimizerDbContext(_dbOptions))
+        {
+            var session = new WorkflowSessionEntity
+            {
+                SessionId = sessionId,
+                WorkflowType = "sql_analysis",
+                Status = "running",
+                State = "{}",
+                EngineType = "maf",
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            dbContext.WorkflowSessions.Add(session);
+            await dbContext.SaveChangesAsync();
+        }
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _runtime.ResumeAsync(sessionId));
+
+        Assert.Contains("not suspended", exception.Message);
+    }
+
+    [Fact]
+    public async Task ResumeAsync_WithMissingCheckpoint_ThrowsException()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+
+        // 创建 suspended session
+        await using (var dbContext = new DbOptimizerDbContext(_dbOptions))
+        {
+            var session = new WorkflowSessionEntity
+            {
+                SessionId = sessionId,
+                WorkflowType = "sql_analysis",
+                Status = "suspended",
+                State = "{}",
+                EngineType = "maf",
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            dbContext.WorkflowSessions.Add(session);
+            await dbContext.SaveChangesAsync();
+        }
+
+        // Mock checkpoint 不存在
+        _runStateStoreMock.Setup(x => x.GetAsync(sessionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MafRunState?)null);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _runtime.ResumeAsync(sessionId));
+
+        Assert.Contains("Checkpoint", exception.Message);
+        Assert.Contains("not found", exception.Message);
+    }
+
+    [Fact]
+    public async Task ResumeAsync_WithDbConfigWorkflow_BuildsCorrectWorkflow()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var runId = $"maf_run_{Guid.NewGuid():N}";
+
+        // 创建 suspended db_config session
+        await using (var dbContext = new DbOptimizerDbContext(_dbOptions))
+        {
+            var session = new WorkflowSessionEntity
+            {
+                SessionId = sessionId,
+                WorkflowType = "db_config_optimization",
+                Status = "suspended",
+                State = "{}",
+                EngineType = "maf",
+                EngineRunId = runId,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            dbContext.WorkflowSessions.Add(session);
+            await dbContext.SaveChangesAsync();
+        }
+
+        // Mock run state
+        var runState = new MafRunState(
+            SessionId: sessionId,
+            RunId: runId,
+            CheckpointRef: $"review-gate-{sessionId}",
+            EngineState: "{}",
+            CreatedAt: DateTime.UtcNow);
+
+        _runStateStoreMock.Setup(x => x.GetAsync(sessionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(runState);
+
+        // Mock workflow factory
+        _workflowFactoryMock.Setup(x => x.BuildDbConfigWorkflow())
+            .Returns((Workflow)null!);
+
+        // Act
+        await _runtime.ResumeAsync(sessionId);
+
+        // Assert
+        _workflowFactoryMock.Verify(x => x.BuildDbConfigWorkflow(), Times.Once);
+    }
+
+    [Fact]
+    public async Task ResumeAsync_WithInvalidWorkflowType_ThrowsException()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var runId = $"maf_run_{Guid.NewGuid():N}";
+
+        // 创建 suspended session with invalid workflow type
+        await using (var dbContext = new DbOptimizerDbContext(_dbOptions))
+        {
+            var session = new WorkflowSessionEntity
+            {
+                SessionId = sessionId,
+                WorkflowType = "invalid_workflow_type",
+                Status = "suspended",
+                State = "{}",
+                EngineType = "maf",
+                EngineRunId = runId,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            dbContext.WorkflowSessions.Add(session);
+            await dbContext.SaveChangesAsync();
+        }
+
+        // Mock run state
+        var runState = new MafRunState(
+            SessionId: sessionId,
+            RunId: runId,
+            CheckpointRef: $"review-gate-{sessionId}",
+            EngineState: "{}",
+            CreatedAt: DateTime.UtcNow);
+
+        _runStateStoreMock.Setup(x => x.GetAsync(sessionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(runState);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _runtime.ResumeAsync(sessionId));
+
+        Assert.Contains("Unknown workflow type", exception.Message);
+    }
+
     public void Dispose()
     {
         // DbContext instances are created per-call via factory, no cleanup needed

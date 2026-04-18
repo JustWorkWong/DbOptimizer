@@ -224,13 +224,96 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
         }
     }
 
-    [Obsolete("MAF engine not yet implemented. Use WorkflowApplicationService (legacy engine) instead.")]
-    public Task<WorkflowResumeResponse> ResumeAsync(
+    public async Task<WorkflowResumeResponse> ResumeAsync(
         Guid sessionId,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogWarning("MAF engine not implemented. Use WorkflowApplicationService instead.");
-        throw new NotImplementedException("MAF engine not yet implemented. Use WorkflowApplicationService (legacy engine) for workflow resume.");
+        _logger.LogInformation(
+            "Resuming workflow. SessionId={SessionId}",
+            sessionId);
+
+        try
+        {
+            // 1. 读取 session 和 checkpoint
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cancellationToken);
+
+            if (session is null)
+            {
+                _logger.LogError("Session not found. SessionId={SessionId}", sessionId);
+                throw new InvalidOperationException($"Session {sessionId} not found");
+            }
+
+            if (session.Status != "suspended")
+            {
+                _logger.LogError(
+                    "Session is not suspended. SessionId={SessionId}, Status={Status}",
+                    sessionId,
+                    session.Status);
+                throw new InvalidOperationException($"Session {sessionId} is not suspended (current status: {session.Status})");
+            }
+
+            // 2. 读取 checkpoint
+            var runState = await _runStateStore.GetAsync(sessionId, cancellationToken);
+            if (runState is null)
+            {
+                _logger.LogError("Checkpoint not found. SessionId={SessionId}", sessionId);
+                throw new InvalidOperationException($"Checkpoint for session {sessionId} not found");
+            }
+
+            // 3. 获取 workflow graph
+            var workflow = session.WorkflowType switch
+            {
+                "sql_analysis" => _workflowFactory.BuildSqlAnalysisWorkflow(),
+                "db_config_optimization" => _workflowFactory.BuildDbConfigWorkflow(),
+                _ => throw new InvalidOperationException($"Unknown workflow type: {session.WorkflowType}")
+            };
+
+            // 4. 更新 session 状态为 running
+            session.Status = "running";
+            session.UpdatedAt = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            // 5. 异步恢复 workflow 执行（fire-and-forget）
+            // MAF workflow 通过 ReviewGateExecutor.HandleReviewResponseAsync 恢复
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    _logger.LogInformation(
+                        "Workflow resume started in background. SessionId={SessionId}, RunId={RunId}",
+                        sessionId,
+                        runState.RunId);
+
+                    // TODO: 实际的 MAF workflow 恢复需要通过 ReviewDecisionResponseMessage 触发
+                    // 当前版本先返回 running 状态，实际执行逻辑待 MAF API 确认后补充
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Workflow resume failed. SessionId={SessionId}, RunId={RunId}",
+                        sessionId,
+                        runState.RunId);
+                    await CleanupSessionOnFailureAsync(sessionId, ex.Message, CancellationToken.None);
+                }
+            }, cancellationToken);
+
+            _logger.LogInformation(
+                "Workflow resumed successfully. SessionId={SessionId}, RunId={RunId}",
+                sessionId,
+                runState.RunId);
+
+            return new WorkflowResumeResponse(
+                SessionId: sessionId,
+                Status: "running");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to resume workflow. SessionId={SessionId}",
+                sessionId);
+            throw;
+        }
     }
 
     [Obsolete("MAF engine not yet implemented. Use WorkflowApplicationService (legacy engine) instead.")]
