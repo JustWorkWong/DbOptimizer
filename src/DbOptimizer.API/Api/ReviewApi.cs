@@ -338,21 +338,43 @@ internal sealed class ReviewApplicationService(
             reviewedAt,
             cancellationToken);
 
-        // 构建 ReviewDecisionResponseMessage
-        var responseMessage = reviewResponseFactory.CreateSqlResponse(
-            correlation.SessionId,
-            taskId,
-            correlation.RequestId,
-            correlation.EngineRunId,
-            correlation.CheckpointRef,
-            normalizedAction,
-            request.Comment,
-            adjustments);
+        // 根据 workflow type 构建对应的 response message 并恢复
+        if (reviewTask.Session.WorkflowType == "sql_analysis")
+        {
+            var sqlResponse = reviewResponseFactory.CreateSqlResponse(
+                correlation.SessionId,
+                taskId,
+                correlation.RequestId,
+                correlation.EngineRunId,
+                correlation.CheckpointRef,
+                normalizedAction,
+                request.Comment,
+                adjustments);
 
-        // 通过 MAF runtime 恢复 workflow（暂时使用 sessionId，后续需要扩展 ResumeAsync 支持 response message）
-        await mafWorkflowRuntime.ResumeAsync(
-            correlation.SessionId,
-            cancellationToken);
+            await mafWorkflowRuntime.ResumeSqlWorkflowAsync(sqlResponse, cancellationToken);
+        }
+        else if (reviewTask.Session.WorkflowType == "db_config_optimization")
+        {
+            var configResponse = reviewResponseFactory.CreateDbConfigResponse(
+                correlation.SessionId,
+                taskId,
+                correlation.RequestId,
+                correlation.EngineRunId,
+                correlation.CheckpointRef,
+                normalizedAction,
+                request.Comment,
+                adjustments);
+
+            await mafWorkflowRuntime.ResumeConfigWorkflowAsync(configResponse, cancellationToken);
+        }
+        else
+        {
+            throw new ApiException(
+                StatusCodes.Status400BadRequest,
+                "UNKNOWN_WORKFLOW_TYPE",
+                $"Unknown workflow type: {reviewTask.Session.WorkflowType}",
+                new { workflowType = reviewTask.Session.WorkflowType });
+        }
 
         return new ReviewSubmitResponse(taskId, MapReviewTaskStatus(normalizedAction), reviewedAt);
     }

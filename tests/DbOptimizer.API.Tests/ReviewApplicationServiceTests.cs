@@ -250,7 +250,7 @@ public sealed class ReviewApplicationServiceTests
             throw new NotSupportedException();
         }
 
-        public object CreateDbConfigResponse(
+        public DbOptimizer.Infrastructure.Maf.DbConfig.ConfigReviewDecisionResponseMessage CreateDbConfigResponse(
             Guid sessionId,
             Guid taskId,
             string requestId,
@@ -282,6 +282,20 @@ public sealed class ReviewApplicationServiceTests
 
         public Task<DbOptimizer.Infrastructure.Maf.Runtime.WorkflowResumeResponse> ResumeAsync(
             Guid sessionId,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<DbOptimizer.Infrastructure.Maf.Runtime.WorkflowResumeResponse> ResumeSqlWorkflowAsync(
+            ReviewDecisionResponseMessage reviewResponse,
+            CancellationToken cancellationToken = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<DbOptimizer.Infrastructure.Maf.Runtime.WorkflowResumeResponse> ResumeConfigWorkflowAsync(
+            DbOptimizer.Infrastructure.Maf.DbConfig.ConfigReviewDecisionResponseMessage reviewResponse,
             CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();

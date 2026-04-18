@@ -27,6 +27,20 @@ public interface IMafWorkflowRuntime
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 恢复已暂停的 SQL workflow，传递审核决策消息
+    /// </summary>
+    Task<WorkflowResumeResponse> ResumeSqlWorkflowAsync(
+        SqlAnalysis.ReviewDecisionResponseMessage reviewResponse,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 恢复已暂停的 Config workflow，传递审核决策消息
+    /// </summary>
+    Task<WorkflowResumeResponse> ResumeConfigWorkflowAsync(
+        DbConfig.ConfigReviewDecisionResponseMessage reviewResponse,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 取消正在运行的 workflow
     /// </summary>
     Task<WorkflowCancelResponse> CancelAsync(
