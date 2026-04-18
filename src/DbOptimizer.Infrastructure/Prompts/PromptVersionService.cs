@@ -51,6 +51,53 @@ public sealed class PromptVersionService(
         return new PromptVersionListResponse(items, total, page, pageSize);
     }
 
+    public async Task<PromptVersionDto?> GetActiveAsync(
+        string agentName,
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var entity = await dbContext.PromptVersions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.AgentName == agentName && x.IsActive,
+                cancellationToken);
+
+        return entity == null ? null : new PromptVersionDto(
+            entity.VersionId,
+            entity.AgentName,
+            entity.VersionNumber,
+            entity.PromptTemplate,
+            entity.Variables,
+            entity.IsActive,
+            entity.CreatedAt,
+            entity.CreatedBy);
+    }
+
+    public async Task<PromptVersionDto?> GetByVersionAsync(
+        string agentName,
+        int versionNumber,
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var entity = await dbContext.PromptVersions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                x => x.AgentName == agentName && x.VersionNumber == versionNumber,
+                cancellationToken);
+
+        return entity == null ? null : new PromptVersionDto(
+            entity.VersionId,
+            entity.AgentName,
+            entity.VersionNumber,
+            entity.PromptTemplate,
+            entity.Variables,
+            entity.IsActive,
+            entity.CreatedAt,
+            entity.CreatedBy);
+    }
+
     public async Task<PromptVersionDto> CreateAsync(
         CreatePromptVersionRequest request,
         CancellationToken cancellationToken = default)
