@@ -48,8 +48,10 @@ public sealed record SqlAnalysisWorkflowCommand(
 /// </summary>
 public sealed record DbConfigWorkflowCommand(
     Guid SessionId,
+    string DatabaseId,
     string DatabaseType,
-    Dictionary<string, object>? CurrentConfig = null);
+    bool AllowFallbackSnapshot = true,
+    bool RequireHumanReview = false);
 
 /// <summary>
 /// Workflow 启动响应
