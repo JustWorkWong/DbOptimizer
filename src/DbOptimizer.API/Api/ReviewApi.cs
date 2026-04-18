@@ -5,6 +5,7 @@ using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
 using DbOptimizer.Infrastructure.Workflows.Review;
 using DbOptimizer.Infrastructure.Maf.Runtime;
+using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.API.Api;
@@ -66,18 +67,22 @@ internal static class ReviewApiRouteBuilderExtensions
         Guid taskId,
         SubmitReviewRequest request,
         IReviewApplicationService reviewApplicationService,
+        IValidator<SubmitReviewRequest> validator,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        try
+        return await validator.ValidateAndExecuteAsync(request, httpContext, async () =>
         {
-            var response = await reviewApplicationService.SubmitAsync(taskId, request, cancellationToken);
-            return ApiEnvelopeFactory.Success(httpContext, response);
-        }
-        catch (ApiException ex)
-        {
-            return ApiEnvelopeFactory.Failure(httpContext, ex.StatusCode, ex.Code, ex.Message, ex.Details);
-        }
+            try
+            {
+                var response = await reviewApplicationService.SubmitAsync(taskId, request, cancellationToken);
+                return ApiEnvelopeFactory.Success(httpContext, response);
+            }
+            catch (ApiException ex)
+            {
+                return ApiEnvelopeFactory.Failure(httpContext, ex.StatusCode, ex.Code, ex.Message, ex.Details);
+            }
+        });
     }
 }
 

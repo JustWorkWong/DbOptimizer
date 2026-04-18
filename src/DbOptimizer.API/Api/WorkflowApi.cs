@@ -5,6 +5,7 @@ using DbOptimizer.Infrastructure.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
 using DbOptimizer.Infrastructure.Workflows.Application;
+using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.API.Api;
@@ -27,43 +28,51 @@ internal static class WorkflowApiRouteBuilderExtensions
     private static async Task<IResult> HandleCreateSqlAnalysisAsync(
         CreateSqlAnalysisWorkflowRequest request,
         IWorkflowApplicationService workflowApplicationService,
+        IValidator<CreateSqlAnalysisWorkflowRequest> validator,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        try
+        return await validator.ValidateAndExecuteAsync(request, httpContext, async () =>
         {
-            var response = await workflowApplicationService.StartSqlAnalysisAsync(request, cancellationToken);
-            return ApiEnvelopeFactory.Success(httpContext, response);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return ApiEnvelopeFactory.Failure(httpContext, StatusCodes.Status400BadRequest, "VALIDATION_ERROR", ex.Message, null);
-        }
-        catch (ApiException ex)
-        {
-            return ApiEnvelopeFactory.Failure(httpContext, ex.StatusCode, ex.Code, ex.Message, ex.Details);
-        }
+            try
+            {
+                var response = await workflowApplicationService.StartSqlAnalysisAsync(request, cancellationToken);
+                return ApiEnvelopeFactory.Success(httpContext, response);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiEnvelopeFactory.Failure(httpContext, StatusCodes.Status400BadRequest, "VALIDATION_ERROR", ex.Message, null);
+            }
+            catch (ApiException ex)
+            {
+                return ApiEnvelopeFactory.Failure(httpContext, ex.StatusCode, ex.Code, ex.Message, ex.Details);
+            }
+        });
     }
 
     private static async Task<IResult> HandleCreateDbConfigOptimizationAsync(
         CreateDbConfigOptimizationWorkflowRequest request,
         IWorkflowApplicationService workflowApplicationService,
+        IValidator<CreateDbConfigOptimizationWorkflowRequest> validator,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        try
+        return await validator.ValidateAndExecuteAsync(request, httpContext, async () =>
         {
-            var response = await workflowApplicationService.StartDbConfigOptimizationAsync(request, cancellationToken);
-            return ApiEnvelopeFactory.Success(httpContext, response);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return ApiEnvelopeFactory.Failure(httpContext, StatusCodes.Status400BadRequest, "VALIDATION_ERROR", ex.Message, null);
-        }
-        catch (ApiException ex)
-        {
-            return ApiEnvelopeFactory.Failure(httpContext, ex.StatusCode, ex.Code, ex.Message, ex.Details);
-        }
+            try
+            {
+                var response = await workflowApplicationService.StartDbConfigOptimizationAsync(request, cancellationToken);
+                return ApiEnvelopeFactory.Success(httpContext, response);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiEnvelopeFactory.Failure(httpContext, StatusCodes.Status400BadRequest, "VALIDATION_ERROR", ex.Message, null);
+            }
+            catch (ApiException ex)
+            {
+                return ApiEnvelopeFactory.Failure(httpContext, ex.StatusCode, ex.Code, ex.Message, ex.Details);
+            }
+        });
     }
 
     private static async Task<IResult> HandleGetWorkflowAsync(
