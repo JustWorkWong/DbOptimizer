@@ -136,10 +136,7 @@ internal interface IReviewApplicationService
 
 internal sealed class ReviewApplicationService(
     IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
-    ICheckpointStorage checkpointStorage,
-    IWorkflowExecutionScheduler workflowExecutionScheduler,
     IWorkflowResultSerializer workflowResultSerializer,
-    IWorkflowEventPublisher workflowEventPublisher,
     IWorkflowReviewTaskGateway reviewTaskGateway,
     IWorkflowReviewResponseFactory reviewResponseFactory,
     IMafWorkflowRuntime mafWorkflowRuntime) : IReviewApplicationService
@@ -251,222 +248,18 @@ internal sealed class ReviewApplicationService(
                 new { taskId, status = reviewTask.Status });
         }
 
-        // 检查是否为 MAF workflow（通过 engine_type 判断）
-        var isMafWorkflow = string.Equals(reviewTask.Session.EngineType, "maf", StringComparison.OrdinalIgnoreCase);
-
-        if (isMafWorkflow)
-        {
-            // MAF workflow 路径：通过 gateway 读取 correlation 并恢复
-            return await HandleMafWorkflowReviewAsync(taskId, reviewTask, request, normalizedAction, cancellationToken);
-        }
-
-        // 旧 workflow 路径：保持原有逻辑
-        var checkpoint = await checkpointStorage.LoadCheckpointAsync(reviewTask.SessionId, cancellationToken);
-        if (checkpoint is null)
+        // 只支持 MAF workflow
+        if (!string.Equals(reviewTask.Session.EngineType, "maf", StringComparison.OrdinalIgnoreCase))
         {
             throw new ApiException(
-                StatusCodes.Status404NotFound,
-                "CHECKPOINT_NOT_FOUND",
-                "Workflow checkpoint not found.",
-                new { sessionId = reviewTask.SessionId });
+                StatusCodes.Status400BadRequest,
+                "LEGACY_WORKFLOW_NOT_SUPPORTED",
+                "Legacy workflow review is no longer supported. Please use MAF workflow.",
+                new { sessionId = reviewTask.SessionId, engineType = reviewTask.Session.EngineType });
         }
 
-        if (checkpoint.Status != WorkflowCheckpointStatus.WaitingForReview)
-        {
-            throw new ApiException(
-                StatusCodes.Status409Conflict,
-                "REVIEW_INVALID_STATE",
-                $"Workflow is not waiting for review. Current status: {checkpoint.Status}.",
-                new { sessionId = reviewTask.SessionId, status = checkpoint.Status.ToString() });
-        }
-
-        var reviewedAt = DateTimeOffset.UtcNow;
-        reviewTask.Status = MapReviewTaskStatus(normalizedAction);
-        reviewTask.ReviewerComment = request.Comment?.Trim();
-        reviewTask.ReviewedAt = reviewedAt;
-        reviewTask.Adjustments = request.Adjustments is { Count: > 0 }
-            ? JsonSerializer.Serialize(request.Adjustments, SerializerOptions)
-            : null;
-
-        switch (normalizedAction)
-        {
-            case "approve":
-            {
-                var updatedCheckpoint = BuildCompletedCheckpoint(
-                    checkpoint,
-                    reviewStatus: "Approved",
-                    comment: request.Comment,
-                    adjustments: request.Adjustments);
-                await PersistReviewAndCheckpointAsync(dbContext, reviewTask, updatedCheckpoint, cancellationToken);
-                await checkpointStorage.SaveCheckpointAsync(updatedCheckpoint, cancellationToken);
-                await checkpointStorage.DeleteCheckpointAsync(checkpoint.SessionId, cancellationToken);
-                await PublishCompletedWorkflowEventAsync(updatedCheckpoint, workflowEventPublisher, cancellationToken);
-                break;
-            }
-            case "adjust":
-            {
-                var updatedCheckpoint = BuildCompletedCheckpoint(
-                    checkpoint,
-                    reviewStatus: "Adjusted",
-                    comment: request.Comment,
-                    adjustments: request.Adjustments);
-                await PersistReviewAndCheckpointAsync(dbContext, reviewTask, updatedCheckpoint, cancellationToken);
-                await checkpointStorage.SaveCheckpointAsync(updatedCheckpoint, cancellationToken);
-                await checkpointStorage.DeleteCheckpointAsync(checkpoint.SessionId, cancellationToken);
-                await PublishCompletedWorkflowEventAsync(updatedCheckpoint, workflowEventPublisher, cancellationToken);
-                break;
-            }
-            case "reject":
-            {
-                var updatedCheckpoint = BuildRejectedCheckpoint(checkpoint, request.Comment!, request.Adjustments);
-                await PersistReviewAndCheckpointAsync(dbContext, reviewTask, updatedCheckpoint, cancellationToken);
-                await checkpointStorage.SaveCheckpointAsync(updatedCheckpoint, cancellationToken);
-                await workflowExecutionScheduler.ResumeAsync(updatedCheckpoint, cancellationToken);
-                break;
-            }
-        }
-
-        return new ReviewSubmitResponse(taskId, reviewTask.Status, reviewedAt);
-    }
-
-    private static WorkflowCheckpoint BuildCompletedCheckpoint(
-        WorkflowCheckpoint checkpoint,
-        string reviewStatus,
-        string? comment,
-        Dictionary<string, JsonElement>? adjustments)
-    {
-        var context = WorkflowContext.FromCheckpoint(checkpoint);
-        context.Set(WorkflowContextKeys.ReviewStatus, reviewStatus);
-
-        if (!string.IsNullOrWhiteSpace(comment))
-        {
-            context.Set("ReviewComment", comment.Trim());
-        }
-
-        if (adjustments is { Count: > 0 })
-        {
-            context.Set("ReviewAdjustments", adjustments);
-        }
-
-        if (reviewStatus == "Adjusted" &&
-            context.TryGet<OptimizationReport>(WorkflowContextKeys.FinalResult, out var report) &&
-            report is not null)
-        {
-            context.Set(WorkflowContextKeys.FinalResult, ApplyAdjustments(report, comment, adjustments));
-        }
-
-        context.ApplyStatus(WorkflowCheckpointStatus.Completed);
-        var workflowCompletedEvent = new WorkflowEventMessage(
-            WorkflowEventType.WorkflowCompleted,
-            checkpoint.SessionId,
-            checkpoint.WorkflowType,
-            DateTimeOffset.UtcNow,
-            new
-            {
-                reviewStatus,
-                reviewComment = comment,
-                completedByReview = true
-            });
-        var trackedEvent = WorkflowTimeline.Append(context, workflowCompletedEvent);
-        context.AdvanceCheckpointVersion();
-        return context.CreateCheckpointSnapshot();
-    }
-
-    private static WorkflowCheckpoint BuildRejectedCheckpoint(
-        WorkflowCheckpoint checkpoint,
-        string comment,
-        Dictionary<string, JsonElement>? adjustments)
-    {
-        var context = WorkflowContext.FromCheckpoint(checkpoint);
-        context.Set(WorkflowContextKeys.ReviewStatus, "Rejected");
-        context.Set(WorkflowContextKeys.RejectionReason, comment.Trim());
-
-        if (adjustments is { Count: > 0 })
-        {
-            context.Set("ReviewAdjustments", adjustments);
-        }
-
-        context.AdvanceCheckpointVersion();
-        return context.CreateCheckpointSnapshot();
-    }
-
-    private async Task PersistReviewAndCheckpointAsync(
-        DbOptimizerDbContext dbContext,
-        ReviewTaskEntity reviewTask,
-        WorkflowCheckpoint checkpoint,
-        CancellationToken cancellationToken)
-    {
-        var workflowSession = await dbContext.WorkflowSessions
-            .SingleOrDefaultAsync(item => item.SessionId == reviewTask.SessionId, cancellationToken);
-
-        if (workflowSession is null)
-        {
-            throw new ApiException(
-                StatusCodes.Status404NotFound,
-                "WORKFLOW_NOT_FOUND",
-                "Workflow session not found.",
-                new { sessionId = reviewTask.SessionId });
-        }
-
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
-        workflowSession.WorkflowType = checkpoint.WorkflowType;
-        workflowSession.Status = checkpoint.Status.ToString();
-        workflowSession.State = JsonSerializer.Serialize(checkpoint, WorkflowCheckpointJson.SerializerOptions);
-        workflowSession.UpdatedAt = checkpoint.UpdatedAt;
-        workflowSession.CompletedAt = checkpoint.Status is WorkflowCheckpointStatus.Completed or WorkflowCheckpointStatus.Failed or WorkflowCheckpointStatus.Cancelled
-            ? checkpoint.UpdatedAt
-            : null;
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-    }
-
-    private static async Task PublishCompletedWorkflowEventAsync(
-        WorkflowCheckpoint checkpoint,
-        IWorkflowEventPublisher workflowEventPublisher,
-        CancellationToken cancellationToken)
-    {
-        var completedEvent = WorkflowTimeline.GetEvents(checkpoint)
-            .LastOrDefault(item => item.EventType == WorkflowEventType.WorkflowCompleted);
-
-        if (completedEvent is null)
-        {
-            return;
-        }
-
-        await workflowEventPublisher.PublishAsync(
-            new WorkflowEventMessage(
-                completedEvent.EventType,
-                completedEvent.SessionId,
-                completedEvent.WorkflowType,
-                completedEvent.Timestamp,
-                completedEvent.Payload,
-                completedEvent.Sequence),
-            cancellationToken);
-    }
-
-    private static OptimizationReport ApplyAdjustments(
-        OptimizationReport report,
-        string? comment,
-        Dictionary<string, JsonElement>? adjustments)
-    {
-        var cloned = JsonSerializer.Deserialize<OptimizationReport>(
-                         JsonSerializer.Serialize(report, SerializerOptions),
-                         SerializerOptions)
-                     ?? new OptimizationReport();
-
-        if (!string.IsNullOrWhiteSpace(comment))
-        {
-            cloned.Warnings.Add($"人工调整说明：{comment.Trim()}");
-        }
-
-        if (adjustments is { Count: > 0 })
-        {
-            cloned.Metadata["reviewAdjustments"] = JsonSerializer.Serialize(adjustments, SerializerOptions);
-        }
-
-        cloned.Metadata["reviewAction"] = "Adjusted";
-        return cloned;
+        // MAF workflow 路径：通过 gateway 读取 correlation 并恢复
+        return await HandleMafWorkflowReviewAsync(taskId, reviewTask, request, normalizedAction, cancellationToken);
     }
 
     private static string NormalizeReviewAction(string action)
