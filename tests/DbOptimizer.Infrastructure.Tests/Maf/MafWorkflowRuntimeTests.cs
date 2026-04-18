@@ -557,8 +557,254 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
         Assert.Contains("Unknown workflow type", exception.Message);
     }
 
+    [Fact]
+    public async Task CancelAsync_SuccessfullyCancelsWorkflow()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var runId = $"maf_run_{Guid.NewGuid():N}";
+
+        // 创建 running session
+        await using (var dbContext = new DbOptimizerDbContext(_dbOptions))
+        {
+            var session = new WorkflowSessionEntity
+            {
+                SessionId = sessionId,
+                WorkflowType = "sql_analysis",
+                Status = "running",
+                State = "{}",
+                EngineType = "maf",
+                EngineRunId = runId,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            dbContext.WorkflowSessions.Add(session);
+            await dbContext.SaveChangesAsync();
+        }
+
+        // Mock run state
+        var runState = new MafRunState(
+            SessionId: sessionId,
+            RunId: runId,
+            CheckpointRef: $"checkpoint-{sessionId}",
+            EngineState: "{}",
+            CreatedAt: DateTime.UtcNow);
+
+        _runStateStoreMock.Setup(x => x.GetAsync(sessionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(runState);
+
+        // Mock workflow factory
+        _workflowFactoryMock.Setup(x => x.BuildSqlAnalysisWorkflow())
+            .Returns((Workflow)null!);
+
+        // Act
+        var response = await _runtime.CancelAsync(sessionId);
+
+        // Assert
+        Assert.NotNull(response);
+        Assert.Equal(sessionId, response.SessionId);
+        Assert.Equal("cancelled", response.Status);
+
+        // 验证 session 状态已更新
+        await using (var dbContext = new DbOptimizerDbContext(_dbOptions))
+        {
+            var session = await dbContext.WorkflowSessions.FindAsync(sessionId);
+            Assert.NotNull(session);
+            Assert.Equal("cancelled", session.Status);
+            Assert.NotNull(session.CompletedAt);
+        }
+
+        // 验证 checkpoint 已删除
+        _runStateStoreMock.Verify(x => x.DeleteAsync(sessionId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CancelAsync_WithRunStateNotFound_ThrowsException()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+
+        // Mock run state not found
+        _runStateStoreMock.Setup(x => x.GetAsync(sessionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MafRunState?)null);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _runtime.CancelAsync(sessionId));
+
+        Assert.Contains("Run state not found", exception.Message);
+    }
+
+    [Fact]
+    public async Task CancelAsync_WithSessionNotFound_ThrowsException()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var runId = $"maf_run_{Guid.NewGuid():N}";
+
+        // Mock run state exists
+        var runState = new MafRunState(
+            SessionId: sessionId,
+            RunId: runId,
+            CheckpointRef: $"checkpoint-{sessionId}",
+            EngineState: "{}",
+            CreatedAt: DateTime.UtcNow);
+
+        _runStateStoreMock.Setup(x => x.GetAsync(sessionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(runState);
+
+        // Session does not exist in database
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _runtime.CancelAsync(sessionId));
+
+        Assert.Contains("Workflow session not found", exception.Message);
+    }
+
+    [Fact]
+    public async Task CancelAsync_WithDbConfigWorkflow_BuildsCorrectWorkflow()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var runId = $"maf_run_{Guid.NewGuid():N}";
+
+        // 创建 running db_config session
+        await using (var dbContext = new DbOptimizerDbContext(_dbOptions))
+        {
+            var session = new WorkflowSessionEntity
+            {
+                SessionId = sessionId,
+                WorkflowType = "db_config_optimization",
+                Status = "running",
+                State = "{}",
+                EngineType = "maf",
+                EngineRunId = runId,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            dbContext.WorkflowSessions.Add(session);
+            await dbContext.SaveChangesAsync();
+        }
+
+        // Mock run state
+        var runState = new MafRunState(
+            SessionId: sessionId,
+            RunId: runId,
+            CheckpointRef: $"checkpoint-{sessionId}",
+            EngineState: "{}",
+            CreatedAt: DateTime.UtcNow);
+
+        _runStateStoreMock.Setup(x => x.GetAsync(sessionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(runState);
+
+        // Mock workflow factory
+        _workflowFactoryMock.Setup(x => x.BuildDbConfigWorkflow())
+            .Returns((Workflow)null!);
+
+        // Act
+        await _runtime.CancelAsync(sessionId);
+
+        // Assert
+        _workflowFactoryMock.Verify(x => x.BuildDbConfigWorkflow(), Times.Once);
+    }
+
+    [Fact]
+    public async Task CancelAsync_WithInvalidWorkflowType_ThrowsException()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var runId = $"maf_run_{Guid.NewGuid():N}";
+
+        // 创建 running session with invalid workflow type
+        await using (var dbContext = new DbOptimizerDbContext(_dbOptions))
+        {
+            var session = new WorkflowSessionEntity
+            {
+                SessionId = sessionId,
+                WorkflowType = "invalid_workflow_type",
+                Status = "running",
+                State = "{}",
+                EngineType = "maf",
+                EngineRunId = runId,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            dbContext.WorkflowSessions.Add(session);
+            await dbContext.SaveChangesAsync();
+        }
+
+        // Mock run state
+        var runState = new MafRunState(
+            SessionId: sessionId,
+            RunId: runId,
+            CheckpointRef: $"checkpoint-{sessionId}",
+            EngineState: "{}",
+            CreatedAt: DateTime.UtcNow);
+
+        _runStateStoreMock.Setup(x => x.GetAsync(sessionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(runState);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _runtime.CancelAsync(sessionId));
+
+        Assert.Contains("Unknown workflow type", exception.Message);
+    }
+
+    [Fact]
+    public async Task CancelAsync_ClearsCheckpointData()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var runId = $"maf_run_{Guid.NewGuid():N}";
+
+        // 创建 running session
+        await using (var dbContext = new DbOptimizerDbContext(_dbOptions))
+        {
+            var session = new WorkflowSessionEntity
+            {
+                SessionId = sessionId,
+                WorkflowType = "sql_analysis",
+                Status = "running",
+                State = "{}",
+                EngineType = "maf",
+                EngineRunId = runId,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            dbContext.WorkflowSessions.Add(session);
+            await dbContext.SaveChangesAsync();
+        }
+
+        // Mock run state
+        var runState = new MafRunState(
+            SessionId: sessionId,
+            RunId: runId,
+            CheckpointRef: $"checkpoint-{sessionId}",
+            EngineState: "{\"some\":\"state\"}",
+            CreatedAt: DateTime.UtcNow);
+
+        _runStateStoreMock.Setup(x => x.GetAsync(sessionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(runState);
+
+        // Mock workflow factory
+        _workflowFactoryMock.Setup(x => x.BuildSqlAnalysisWorkflow())
+            .Returns((Workflow)null!);
+
+        // Act
+        await _runtime.CancelAsync(sessionId);
+
+        // Assert - 验证 DeleteAsync 被调用
+        _runStateStoreMock.Verify(
+            x => x.DeleteAsync(sessionId, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "Checkpoint data should be deleted when workflow is cancelled");
+    }
+
     public void Dispose()
     {
         // DbContext instances are created per-call via factory, no cleanup needed
     }
 }
+
