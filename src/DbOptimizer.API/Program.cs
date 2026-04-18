@@ -156,6 +156,7 @@ builder.Services.AddSingleton(mafWorkflowRuntimeOptions);
 builder.Services.AddSingleton<IMafWorkflowFactory, MafWorkflowFactory>();
 builder.Services.AddSingleton<IMafWorkflowRuntime, MafWorkflowRuntime>();
 builder.Services.AddSingleton<IMafRunStateStore, MafRunStateStore>();
+builder.Services.AddSingleton<IMafCheckpointStore, MafCheckpointStore>();
 builder.Services.AddSingleton<IMcpFallbackStrategy, McpFallbackStrategy>();
 
 // MCP 服务注册
