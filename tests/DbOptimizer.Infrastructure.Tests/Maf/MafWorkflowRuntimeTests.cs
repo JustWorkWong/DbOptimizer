@@ -224,6 +224,115 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
         Assert.NotNull(session.CompletedAt);
     }
 
+    [Fact]
+    public async Task StartDbConfigOptimizationAsync_CreatesWorkflowSession()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var command = new DbConfigWorkflowCommand(
+            SessionId: sessionId,
+            DatabaseId: "test-db-001",
+            DatabaseType: "mysql",
+            AllowFallbackSnapshot: true,
+            RequireHumanReview: false);
+
+        // Mock workflow factory 返回 null（测试不依赖实际 workflow 执行）
+        _workflowFactoryMock.Setup(x => x.BuildDbConfigWorkflow())
+            .Returns((Workflow)null!);
+
+        // Act
+        var response = await _runtime.StartDbConfigOptimizationAsync(command);
+
+        // Assert
+        Assert.NotNull(response);
+        Assert.Equal(sessionId, response.SessionId);
+        Assert.Equal("running", response.Status);
+        Assert.NotEmpty(response.RunId);
+
+        // 验证 session 已创建
+        await using var dbContext = new DbOptimizerDbContext(_dbOptions);
+        var session = await dbContext.WorkflowSessions.FindAsync(sessionId);
+        Assert.NotNull(session);
+        Assert.Equal("db_config_optimization", session.WorkflowType);
+        Assert.Equal("running", session.Status);
+    }
+
+    [Fact]
+    public async Task StartDbConfigOptimizationAsync_SavesRunState()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var command = new DbConfigWorkflowCommand(
+            SessionId: sessionId,
+            DatabaseId: "test-db-002",
+            DatabaseType: "postgresql",
+            AllowFallbackSnapshot: false,
+            RequireHumanReview: true);
+
+        _workflowFactoryMock.Setup(x => x.BuildDbConfigWorkflow())
+            .Returns((Workflow)null!);
+
+        // Act
+        await _runtime.StartDbConfigOptimizationAsync(command);
+
+        // Assert
+        _runStateStoreMock.Verify(
+            x => x.SaveAsync(
+                sessionId,
+                It.IsAny<string>(),
+                string.Empty,
+                "{}",
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task StartDbConfigOptimizationAsync_CallsWorkflowFactory()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var command = new DbConfigWorkflowCommand(
+            SessionId: sessionId,
+            DatabaseId: "test-db-003",
+            DatabaseType: "mysql");
+
+        _workflowFactoryMock.Setup(x => x.BuildDbConfigWorkflow())
+            .Returns((Workflow)null!);
+
+        // Act
+        await _runtime.StartDbConfigOptimizationAsync(command);
+
+        // Assert
+        _workflowFactoryMock.Verify(x => x.BuildDbConfigWorkflow(), Times.Once);
+    }
+
+    [Fact]
+    public async Task StartDbConfigOptimizationAsync_OnFailure_CleansUpSession()
+    {
+        // Arrange
+        var sessionId = Guid.NewGuid();
+        var command = new DbConfigWorkflowCommand(
+            SessionId: sessionId,
+            DatabaseId: "test-db-004",
+            DatabaseType: "mysql");
+
+        // Mock workflow factory 抛出异常
+        _workflowFactoryMock.Setup(x => x.BuildDbConfigWorkflow())
+            .Throws(new InvalidOperationException("Workflow build failed"));
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _runtime.StartDbConfigOptimizationAsync(command));
+
+        // 验证 session 被标记为 failed
+        await using var dbContext = new DbOptimizerDbContext(_dbOptions);
+        var session = await dbContext.WorkflowSessions.FindAsync(sessionId);
+        Assert.NotNull(session);
+        Assert.Equal("failed", session.Status);
+        Assert.NotNull(session.ErrorMessage);
+        Assert.NotNull(session.CompletedAt);
+    }
+
     public void Dispose()
     {
         // DbContext instances are created per-call via factory, no cleanup needed
