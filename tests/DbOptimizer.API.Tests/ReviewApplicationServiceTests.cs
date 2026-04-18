@@ -130,7 +130,7 @@ public sealed class ReviewApplicationServiceTests
             dbContext.WorkflowSessions.Add(new WorkflowSessionEntity
             {
                 SessionId = sessionId,
-                WorkflowType = "SqlAnalysis",
+                WorkflowType = "sql_analysis",
                 Status = "WaitingForReview",
                 State = JsonSerializer.Serialize(new { databaseId = "test-db", report }, SerializerOptions),
                 EngineType = "maf",
@@ -220,7 +220,21 @@ public sealed class ReviewApplicationServiceTests
             Guid taskId,
             CancellationToken cancellationToken = default)
         {
-            throw new NotSupportedException();
+            return Task.FromResult<ReviewTaskCorrelation?>(new ReviewTaskCorrelation(
+                SessionId: Guid.NewGuid(),
+                WorkflowType: "sql_analysis",
+                RequestId: "test-request-id",
+                EngineRunId: "test-run-id",
+                CheckpointRef: "test-checkpoint",
+                Payload: new WorkflowResultEnvelope
+                {
+                    ResultType = "sql_optimization",
+                    DisplayName = "SQL Optimization Result",
+                    Summary = "Test summary",
+                    Data = JsonDocument.Parse("{}").RootElement,
+                    Metadata = JsonDocument.Parse("{}").RootElement
+                }
+            ));
         }
 
         public Task UpdateStatusAsync(
@@ -231,7 +245,7 @@ public sealed class ReviewApplicationServiceTests
             DateTimeOffset reviewedAt,
             CancellationToken cancellationToken = default)
         {
-            throw new NotSupportedException();
+            return Task.CompletedTask;
         }
     }
 
@@ -247,7 +261,17 @@ public sealed class ReviewApplicationServiceTests
             string? comment,
             IReadOnlyDictionary<string, JsonElement> adjustments)
         {
-            throw new NotSupportedException();
+            return new ReviewDecisionResponseMessage(
+                SessionId: sessionId,
+                TaskId: taskId,
+                RequestId: requestId,
+                RunId: runId,
+                CheckpointRef: checkpointRef,
+                Action: action,
+                Comment: comment,
+                Adjustments: adjustments,
+                ReviewedAt: DateTimeOffset.UtcNow
+            );
         }
 
         public DbOptimizer.Infrastructure.Maf.DbConfig.ConfigReviewDecisionResponseMessage CreateDbConfigResponse(
@@ -291,7 +315,10 @@ public sealed class ReviewApplicationServiceTests
             ReviewDecisionResponseMessage reviewResponse,
             CancellationToken cancellationToken = default)
         {
-            throw new NotSupportedException();
+            return Task.FromResult(new DbOptimizer.Infrastructure.Maf.Runtime.WorkflowResumeResponse(
+                SessionId: reviewResponse.SessionId,
+                Status: "Completed"
+            ));
         }
 
         public Task<DbOptimizer.Infrastructure.Maf.Runtime.WorkflowResumeResponse> ResumeConfigWorkflowAsync(
