@@ -58,7 +58,7 @@ public sealed class ConfigHumanReviewGateExecutor(
     }
 
     public async ValueTask<DbConfigOptimizationCompletedMessage> HandleReviewResponseAsync(
-        ReviewDecisionResponseMessage message,
+        ConfigReviewDecisionResponseMessage message,
         IWorkflowContext context,
         CancellationToken cancellationToken = default)
     {

@@ -1,5 +1,6 @@
 using DbOptimizer.Core.Models;
 using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
+using DbOptimizer.Infrastructure.Maf.DbConfig;
 
 namespace DbOptimizer.Infrastructure.Workflows.Review;
 
@@ -19,7 +20,7 @@ public interface IWorkflowReviewResponseFactory
         string? comment,
         IReadOnlyDictionary<string, System.Text.Json.JsonElement> adjustments);
 
-    object CreateDbConfigResponse(
+    ConfigReviewDecisionResponseMessage CreateDbConfigResponse(
         Guid sessionId,
         Guid taskId,
         string requestId,

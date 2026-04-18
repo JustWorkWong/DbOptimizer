@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DbOptimizer.Core.Models;
 using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
+using DbOptimizer.Infrastructure.Maf.DbConfig;
 
 namespace DbOptimizer.Infrastructure.Workflows.Review;
 
@@ -28,7 +29,7 @@ public sealed class WorkflowReviewResponseFactory : IWorkflowReviewResponseFacto
             DateTimeOffset.UtcNow);
     }
 
-    public object CreateDbConfigResponse(
+    public ConfigReviewDecisionResponseMessage CreateDbConfigResponse(
         Guid sessionId,
         Guid taskId,
         string requestId,
@@ -38,8 +39,7 @@ public sealed class WorkflowReviewResponseFactory : IWorkflowReviewResponseFacto
         string? comment,
         IReadOnlyDictionary<string, JsonElement> adjustments)
     {
-        return new
-        {
+        return new ConfigReviewDecisionResponseMessage(
             sessionId,
             taskId,
             requestId,
@@ -48,7 +48,6 @@ public sealed class WorkflowReviewResponseFactory : IWorkflowReviewResponseFacto
             action,
             comment,
             adjustments,
-            reviewedAt = DateTimeOffset.UtcNow
-        };
+            DateTimeOffset.UtcNow);
     }
 }

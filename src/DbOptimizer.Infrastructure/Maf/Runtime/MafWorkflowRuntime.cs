@@ -4,6 +4,8 @@ using Microsoft.Agents.AI.Workflows;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
 using DbOptimizer.Infrastructure.Maf.DbConfig;
+using DbOptimizer.Infrastructure.Maf.SqlAnalysis.Executors;
+using DbOptimizer.Infrastructure.Maf.DbConfig.Executors;
 
 namespace DbOptimizer.Infrastructure.Maf.Runtime;
 
@@ -276,7 +278,8 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             await dbContext.SaveChangesAsync(cancellationToken);
 
             // 5. 异步恢复 workflow 执行（fire-and-forget）
-            // MAF workflow 通过 ReviewGateExecutor.HandleReviewResponseAsync 恢复
+            // 注意：实际恢复需要通过 ResumeSqlWorkflowAsync 或 ResumeConfigWorkflowAsync
+            // 传递 ReviewDecisionResponseMessage
             _ = Task.Run(async () =>
             {
                 try
@@ -313,6 +316,194 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             _logger.LogError(ex,
                 "Failed to resume workflow. SessionId={SessionId}",
                 sessionId);
+            throw;
+        }
+    }
+
+    public async Task<WorkflowResumeResponse> ResumeSqlWorkflowAsync(
+        SqlAnalysis.ReviewDecisionResponseMessage reviewResponse,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reviewResponse);
+
+        _logger.LogInformation(
+            "Resuming SQL workflow with review response. SessionId={SessionId}, TaskId={TaskId}, Action={Action}",
+            reviewResponse.SessionId,
+            reviewResponse.TaskId,
+            reviewResponse.Action);
+
+        try
+        {
+            // 1. 验证 session 状态
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var session = await dbContext.WorkflowSessions.FindAsync([reviewResponse.SessionId], cancellationToken);
+
+            if (session is null)
+            {
+                throw new InvalidOperationException($"Session {reviewResponse.SessionId} not found");
+            }
+
+            if (session.Status != "suspended")
+            {
+                throw new InvalidOperationException($"Session {reviewResponse.SessionId} is not suspended (current status: {session.Status})");
+            }
+
+            // 2. 更新 session 状态
+            if (reviewResponse.Action == "reject")
+            {
+                session.Status = "failed";
+                session.ErrorMessage = $"Review rejected: {reviewResponse.Comment}";
+                session.CompletedAt = DateTimeOffset.UtcNow;
+            }
+            else
+            {
+                session.Status = "running";
+            }
+
+            session.UpdatedAt = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            // 3. 如果是拒绝，直接返回
+            if (reviewResponse.Action == "reject")
+            {
+                _logger.LogWarning(
+                    "SQL workflow rejected. SessionId={SessionId}, Comment={Comment}",
+                    reviewResponse.SessionId,
+                    reviewResponse.Comment);
+
+                return new WorkflowResumeResponse(
+                    SessionId: reviewResponse.SessionId,
+                    Status: "failed");
+            }
+
+            // 4. 异步恢复 workflow 执行
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    _logger.LogInformation(
+                        "SQL workflow resume execution started. SessionId={SessionId}",
+                        reviewResponse.SessionId);
+
+                    // TODO: 调用 SqlHumanReviewGateExecutor.HandleReviewResponseAsync
+                    // 需要 MAF 提供 workflow context 和 executor 调用机制
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "SQL workflow resume execution failed. SessionId={SessionId}",
+                        reviewResponse.SessionId);
+                    await CleanupSessionOnFailureAsync(reviewResponse.SessionId, ex.Message, CancellationToken.None);
+                }
+            }, cancellationToken);
+
+            _logger.LogInformation(
+                "SQL workflow resumed successfully. SessionId={SessionId}",
+                reviewResponse.SessionId);
+
+            return new WorkflowResumeResponse(
+                SessionId: reviewResponse.SessionId,
+                Status: "running");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to resume SQL workflow. SessionId={SessionId}",
+                reviewResponse.SessionId);
+            throw;
+        }
+    }
+
+    public async Task<WorkflowResumeResponse> ResumeConfigWorkflowAsync(
+        DbConfig.ConfigReviewDecisionResponseMessage reviewResponse,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reviewResponse);
+
+        _logger.LogInformation(
+            "Resuming Config workflow with review response. SessionId={SessionId}, TaskId={TaskId}, Action={Action}",
+            reviewResponse.SessionId,
+            reviewResponse.TaskId,
+            reviewResponse.Action);
+
+        try
+        {
+            // 1. 验证 session 状态
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var session = await dbContext.WorkflowSessions.FindAsync([reviewResponse.SessionId], cancellationToken);
+
+            if (session is null)
+            {
+                throw new InvalidOperationException($"Session {reviewResponse.SessionId} not found");
+            }
+
+            if (session.Status != "suspended")
+            {
+                throw new InvalidOperationException($"Session {reviewResponse.SessionId} is not suspended (current status: {session.Status})");
+            }
+
+            // 2. 更新 session 状态
+            if (reviewResponse.Action == "reject")
+            {
+                session.Status = "failed";
+                session.ErrorMessage = $"Review rejected: {reviewResponse.Comment}";
+                session.CompletedAt = DateTimeOffset.UtcNow;
+            }
+            else
+            {
+                session.Status = "running";
+            }
+
+            session.UpdatedAt = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            // 3. 如果是拒绝，直接返回
+            if (reviewResponse.Action == "reject")
+            {
+                _logger.LogWarning(
+                    "Config workflow rejected. SessionId={SessionId}, Comment={Comment}",
+                    reviewResponse.SessionId,
+                    reviewResponse.Comment);
+
+                return new WorkflowResumeResponse(
+                    SessionId: reviewResponse.SessionId,
+                    Status: "failed");
+            }
+
+            // 4. 异步恢复 workflow 执行
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    _logger.LogInformation(
+                        "Config workflow resume execution started. SessionId={SessionId}",
+                        reviewResponse.SessionId);
+
+                    // TODO: 调用 ConfigHumanReviewGateExecutor.HandleReviewResponseAsync
+                    // 需要 MAF 提供 workflow context 和 executor 调用机制
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Config workflow resume execution failed. SessionId={SessionId}",
+                        reviewResponse.SessionId);
+                    await CleanupSessionOnFailureAsync(reviewResponse.SessionId, ex.Message, CancellationToken.None);
+                }
+            }, cancellationToken);
+
+            _logger.LogInformation(
+                "Config workflow resumed successfully. SessionId={SessionId}",
+                reviewResponse.SessionId);
+
+            return new WorkflowResumeResponse(
+                SessionId: reviewResponse.SessionId,
+                Status: "running");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to resume Config workflow. SessionId={SessionId}",
+                reviewResponse.SessionId);
             throw;
         }
     }

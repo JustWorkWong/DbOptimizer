@@ -37,9 +37,9 @@ public sealed record DbConfigOptimizationCompletedMessage(
     DbOptimizer.Core.Models.WorkflowResultEnvelope FinalResult);
 
 /* =========================
- * 复用 SQL workflow 的 ReviewDecisionResponseMessage
+ * Config workflow 专用的 ReviewDecisionResponseMessage
  * ========================= */
-public sealed record ReviewDecisionResponseMessage(
+public sealed record ConfigReviewDecisionResponseMessage(
     Guid SessionId,
     Guid TaskId,
     string RequestId,
