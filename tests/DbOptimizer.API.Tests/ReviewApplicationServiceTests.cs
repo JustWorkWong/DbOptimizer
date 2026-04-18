@@ -1,7 +1,6 @@
 using System.Text.Json;
 using DbOptimizer.API.Api;
 using DbOptimizer.Core.Models;
-using DbOptimizer.Infrastructure.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
 using DbOptimizer.Infrastructure.Workflows.Application;
@@ -17,7 +16,7 @@ namespace DbOptimizer.API.Tests;
 public sealed class ReviewApplicationServiceTests
 {
     [Fact]
-    public async Task SubmitAsync_Approve_CompletesCheckpoint_DeletesCheckpoint_AndPublishesWorkflowCompleted()
+    public async Task SubmitAsync_Approve_UpdatesSessionAndReviewTask()
     {
         await using var harness = await ReviewServiceHarness.CreateAsync();
         var service = harness.CreateService();
@@ -31,10 +30,6 @@ public sealed class ReviewApplicationServiceTests
             });
 
         Assert.Equal("Approved", result.Status);
-        Assert.NotNull(harness.CheckpointStorage.SavedCheckpoint);
-        Assert.Equal(WorkflowCheckpointStatus.Completed, harness.CheckpointStorage.SavedCheckpoint!.Status);
-        Assert.Equal(harness.SessionId, harness.CheckpointStorage.DeletedSessionId);
-        Assert.Contains(harness.WorkflowEventPublisher.PublishedEvents, item => item.EventType == WorkflowEventType.WorkflowCompleted);
 
         await using var db = await harness.DbContextFactory.CreateDbContextAsync();
         var reviewTask = await db.ReviewTasks.SingleAsync(item => item.TaskId == harness.ReviewTaskId);
@@ -45,56 +40,43 @@ public sealed class ReviewApplicationServiceTests
     }
 
     [Fact]
-    public async Task SubmitAsync_Reject_PersistsRejectionReason_AndResumesWorkflow()
+    public async Task SubmitAsync_Reject_ThrowsNotSupportedException()
     {
         await using var harness = await ReviewServiceHarness.CreateAsync();
         var service = harness.CreateService();
 
-        var result = await service.SubmitAsync(
-            harness.ReviewTaskId,
-            new SubmitReviewRequest
-            {
-                Action = "reject",
-                Comment = "need different index"
-            });
-
-        Assert.Equal("Rejected", result.Status);
-        Assert.NotNull(harness.CheckpointStorage.SavedCheckpoint);
-        Assert.Equal(WorkflowCheckpointStatus.WaitingForReview, harness.CheckpointStorage.SavedCheckpoint!.Status);
-        Assert.Equal("need different index", harness.CheckpointStorage.SavedCheckpoint.Context[WorkflowContextKeys.RejectionReason].GetString());
-        Assert.NotNull(harness.WorkflowExecutionScheduler.ResumedCheckpoint);
-        Assert.Equal(harness.SessionId, harness.WorkflowExecutionScheduler.ResumedCheckpoint!.SessionId);
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await service.SubmitAsync(
+                harness.ReviewTaskId,
+                new SubmitReviewRequest
+                {
+                    Action = "reject",
+                    Comment = "need different index"
+                });
+        });
     }
 
     [Fact]
-    public async Task SubmitAsync_Adjust_RewritesFinalResult_AndMarksAdjusted()
+    public async Task SubmitAsync_Adjust_ThrowsNotSupportedException()
     {
         await using var harness = await ReviewServiceHarness.CreateAsync();
         var service = harness.CreateService();
 
-        var result = await service.SubmitAsync(
-            harness.ReviewTaskId,
-            new SubmitReviewRequest
-            {
-                Action = "adjust",
-                Comment = "rename the index",
-                Adjustments = new Dictionary<string, JsonElement>
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await service.SubmitAsync(
+                harness.ReviewTaskId,
+                new SubmitReviewRequest
                 {
-                    ["indexName"] = JsonSerializer.SerializeToElement("idx_users_age_v2")
-                }
-            });
-
-        Assert.Equal("Adjusted", result.Status);
-        Assert.NotNull(harness.CheckpointStorage.SavedCheckpoint);
-        Assert.Equal(WorkflowCheckpointStatus.Completed, harness.CheckpointStorage.SavedCheckpoint!.Status);
-
-        var finalResult = harness.CheckpointStorage.SavedCheckpoint.Context[WorkflowContextKeys.FinalResult]
-            .Deserialize<OptimizationReport>();
-
-        Assert.NotNull(finalResult);
-        Assert.Equal(WorkflowCheckpointStatus.Completed, harness.CheckpointStorage.SavedCheckpoint.Status);
-        Assert.Equal("rename the index", harness.CheckpointStorage.SavedCheckpoint.Context["ReviewComment"].GetString());
-        Assert.True(harness.CheckpointStorage.SavedCheckpoint.Context.ContainsKey("ReviewAdjustments"));
+                    Action = "adjust",
+                    Comment = "rename the index",
+                    Adjustments = new Dictionary<string, JsonElement>
+                    {
+                        ["indexName"] = JsonSerializer.SerializeToElement("idx_users_age_v2")
+                    }
+                });
+        });
     }
 
     private sealed class ReviewServiceHarness : IAsyncDisposable
@@ -104,28 +86,16 @@ public sealed class ReviewApplicationServiceTests
         private ReviewServiceHarness(
             SqliteConnection connection,
             TestDbContextFactory dbContextFactory,
-            StubCheckpointStorage checkpointStorage,
-            StubWorkflowExecutionScheduler workflowExecutionScheduler,
-            StubWorkflowEventPublisher workflowEventPublisher,
             Guid sessionId,
             Guid reviewTaskId)
         {
             _connection = connection;
             DbContextFactory = dbContextFactory;
-            CheckpointStorage = checkpointStorage;
-            WorkflowExecutionScheduler = workflowExecutionScheduler;
-            WorkflowEventPublisher = workflowEventPublisher;
             SessionId = sessionId;
             ReviewTaskId = reviewTaskId;
         }
 
         public TestDbContextFactory DbContextFactory { get; }
-
-        public StubCheckpointStorage CheckpointStorage { get; }
-
-        public StubWorkflowExecutionScheduler WorkflowExecutionScheduler { get; }
-
-        public StubWorkflowEventPublisher WorkflowEventPublisher { get; }
 
         public Guid SessionId { get; }
 
@@ -135,10 +105,7 @@ public sealed class ReviewApplicationServiceTests
         {
             return new ReviewApplicationService(
                 DbContextFactory,
-                CheckpointStorage,
-                WorkflowExecutionScheduler,
                 new WorkflowResultSerializer(),
-                WorkflowEventPublisher,
                 new StubWorkflowReviewTaskGateway(),
                 new StubWorkflowReviewResponseFactory(),
                 new StubMafWorkflowRuntime());
@@ -164,8 +131,9 @@ public sealed class ReviewApplicationServiceTests
             {
                 SessionId = sessionId,
                 WorkflowType = "SqlAnalysis",
-                Status = WorkflowCheckpointStatus.WaitingForReview.ToString(),
-                State = JsonSerializer.Serialize(CreateCheckpoint(sessionId, report), WorkflowCheckpointJson.SerializerOptions),
+                Status = "WaitingForReview",
+                State = JsonSerializer.Serialize(new { databaseId = "test-db", report }, SerializerOptions),
+                EngineType = "maf",
                 CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
                 UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-1)
             });
@@ -184,9 +152,6 @@ public sealed class ReviewApplicationServiceTests
             return new ReviewServiceHarness(
                 connection,
                 factory,
-                new StubCheckpointStorage(CreateCheckpoint(sessionId, report)),
-                new StubWorkflowExecutionScheduler(),
-                new StubWorkflowEventPublisher(),
                 sessionId,
                 reviewTaskId);
         }
@@ -196,35 +161,7 @@ public sealed class ReviewApplicationServiceTests
             await _connection.DisposeAsync();
         }
 
-        private static WorkflowCheckpoint CreateCheckpoint(Guid sessionId, OptimizationReport report)
-        {
-            var context = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase)
-            {
-                [WorkflowContextKeys.FinalResult] = JsonSerializer.SerializeToElement(report),
-                [WorkflowContextKeys.ReviewId] = JsonSerializer.SerializeToElement(Guid.NewGuid()),
-                [WorkflowContextKeys.ReviewStatus] = JsonSerializer.SerializeToElement("Pending")
-            };
-
-            return new WorkflowCheckpoint
-            {
-                SessionId = sessionId,
-                WorkflowType = "SqlAnalysis",
-                Status = WorkflowCheckpointStatus.WaitingForReview,
-                CurrentExecutor = string.Empty,
-                CheckpointVersion = 5,
-                Context = context,
-                CompletedExecutors =
-                [
-                    "SqlParserExecutor",
-                    "ExecutionPlanExecutor",
-                    "IndexAdvisorExecutor",
-                    "CoordinatorExecutor",
-                    "HumanReviewExecutor"
-                ],
-                CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
-                UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-1)
-            };
-        }
+        private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
         private static OptimizationReport CreateReport()
         {
@@ -262,72 +199,6 @@ public sealed class ReviewApplicationServiceTests
         public Task<DbOptimizerDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(new DbOptimizerDbContext(options));
-        }
-    }
-
-    private sealed class StubCheckpointStorage(WorkflowCheckpoint? checkpoint) : ICheckpointStorage
-    {
-        public WorkflowCheckpoint? SavedCheckpoint { get; private set; }
-
-        public Guid? DeletedSessionId { get; private set; }
-
-        public Task SaveCheckpointAsync(WorkflowCheckpoint checkpoint, CancellationToken cancellationToken = default)
-        {
-            SavedCheckpoint = checkpoint;
-            return Task.CompletedTask;
-        }
-
-        public Task<WorkflowCheckpoint?> LoadCheckpointAsync(Guid sessionId, CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(checkpoint?.SessionId == sessionId ? checkpoint : null);
-        }
-
-        public Task DeleteCheckpointAsync(Guid sessionId, CancellationToken cancellationToken = default)
-        {
-            DeletedSessionId = sessionId;
-            return Task.CompletedTask;
-        }
-    }
-
-    private sealed class StubWorkflowExecutionScheduler : IWorkflowExecutionScheduler
-    {
-        public WorkflowCheckpoint? ResumedCheckpoint { get; private set; }
-
-        public Task<LegacyWorkflowStartResponse> ScheduleSqlAnalysisAsync(CreateSqlAnalysisWorkflowRequest request, CancellationToken cancellationToken = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task<LegacyWorkflowStartResponse> ScheduleDbConfigOptimizationAsync(CreateDbConfigOptimizationWorkflowRequest request, CancellationToken cancellationToken = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task<LegacyWorkflowCancelResponse> CancelAsync(Guid sessionId, CancellationToken cancellationToken = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task<LegacyWorkflowResumeResponse> ResumeAsync(Guid sessionId, CancellationToken cancellationToken = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task<LegacyWorkflowResumeResponse> ResumeAsync(WorkflowCheckpoint checkpoint, CancellationToken cancellationToken = default)
-        {
-            ResumedCheckpoint = checkpoint;
-            return Task.FromResult(new LegacyWorkflowResumeResponse(checkpoint.SessionId, "Running", "RegenerationExecutor"));
-        }
-    }
-
-    private sealed class StubWorkflowEventPublisher : IWorkflowEventPublisher
-    {
-        public List<WorkflowEventMessage> PublishedEvents { get; } = [];
-
-        public Task PublishAsync(WorkflowEventMessage workflowEvent, CancellationToken cancellationToken = default)
-        {
-            PublishedEvents.Add(workflowEvent);
-            return Task.CompletedTask;
         }
     }
 
