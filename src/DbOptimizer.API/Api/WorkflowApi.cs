@@ -146,11 +146,6 @@ internal interface IWorkflowExecutionScheduler
     Task<LegacyWorkflowResumeResponse> ResumeAsync(WorkflowCheckpoint checkpoint, CancellationToken cancellationToken = default);
 }
 
-internal interface IWorkflowQueryService
-{
-    Task<LegacyWorkflowStatusResponse?> GetAsync(Guid sessionId, CancellationToken cancellationToken = default);
-}
-
 internal sealed class WorkflowExecutionScheduler(
     IWorkflowRunner workflowRunner,
     ICheckpointStorage checkpointStorage,
@@ -484,86 +479,6 @@ internal sealed class WorkflowExecutionScheduler(
             "INVALID_REQUEST",
             "Unable to resolve database engine. Provide DatabaseEngine or a DatabaseId that includes mysql/postgres.",
             new { databaseId, databaseEngine });
-    }
-}
-
-internal sealed class WorkflowQueryService(
-    ICheckpointStorage checkpointStorage,
-    IWorkflowResultSerializer workflowResultSerializer) : IWorkflowQueryService
-{
-    private const int SqlAnalysisStepCount = 6;
-
-    public async Task<LegacyWorkflowStatusResponse?> GetAsync(Guid sessionId, CancellationToken cancellationToken = default)
-    {
-        var checkpoint = await checkpointStorage.LoadCheckpointAsync(sessionId, cancellationToken);
-        if (checkpoint is null)
-        {
-            return null;
-        }
-
-        checkpoint.Context.TryGetValue(WorkflowContextKeys.FinalResult, out var finalResultElement);
-        checkpoint.Context.TryGetValue(WorkflowContextKeys.ReviewId, out var reviewIdElement);
-        checkpoint.Context.TryGetValue(WorkflowContextKeys.ReviewStatus, out var reviewStatusElement);
-        checkpoint.Context.TryGetValue("LastError", out var errorElement);
-        checkpoint.Context.TryGetValue(WorkflowContextKeys.DatabaseId, out var databaseIdElement);
-        checkpoint.Context.TryGetValue(WorkflowContextKeys.DatabaseType, out var databaseTypeElement);
-
-        var result = finalResultElement.ValueKind == default
-            ? null
-            : workflowResultSerializer.ToEnvelope(
-                checkpoint.WorkflowType,
-                finalResultElement,
-                databaseIdElement.ValueKind == default ? null : databaseIdElement.Deserialize<string>(),
-                databaseTypeElement.ValueKind == default ? null : databaseTypeElement.Deserialize<string>());
-        var reviewId = reviewIdElement.ValueKind == default
-            ? null
-            : reviewIdElement.Deserialize<Guid?>();
-        var reviewStatus = reviewStatusElement.ValueKind == default
-            ? null
-            : reviewStatusElement.Deserialize<string>();
-        var errorMessage = errorElement.ValueKind == default
-            ? null
-            : errorElement.Deserialize<string>();
-
-        return new LegacyWorkflowStatusResponse(
-            checkpoint.SessionId,
-            checkpoint.WorkflowType,
-            checkpoint.Status.ToString(),
-            ResolveCurrentExecutor(checkpoint),
-            CalculateProgress(checkpoint),
-            checkpoint.CreatedAt,
-            checkpoint.UpdatedAt,
-            checkpoint.Status is WorkflowCheckpointStatus.Completed or WorkflowCheckpointStatus.Failed or WorkflowCheckpointStatus.Cancelled
-                ? checkpoint.UpdatedAt
-                : null,
-            result,
-            reviewId,
-            reviewStatus,
-            errorMessage);
-    }
-
-    private static string? ResolveCurrentExecutor(WorkflowCheckpoint checkpoint)
-    {
-        if (checkpoint.Status == WorkflowCheckpointStatus.WaitingForReview)
-        {
-            return "HumanReviewExecutor";
-        }
-
-        return string.IsNullOrWhiteSpace(checkpoint.CurrentExecutor)
-            ? null
-            : checkpoint.CurrentExecutor;
-    }
-
-    private static int CalculateProgress(WorkflowCheckpoint checkpoint)
-    {
-        if (checkpoint.Status == WorkflowCheckpointStatus.Completed)
-        {
-            return 100;
-        }
-
-        var completedSteps = checkpoint.CompletedExecutors.Count;
-        var progress = (int)Math.Round((double)completedSteps / SqlAnalysisStepCount * 100, MidpointRounding.AwayFromZero);
-        return Math.Clamp(progress, 0, 99);
     }
 }
 
