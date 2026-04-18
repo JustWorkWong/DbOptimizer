@@ -92,6 +92,7 @@ eventSource.onmessage = (event) => {
 
 ## 变更日志
 
+- 2026-04-18: ✅ MAF 迁移完成，Legacy engine 已移除，所有 workflow 基于 MAF 1.0.0-rc4
 - 2026-04-16: 明确迁移职责边界：后端结构迁移统一走 EF Core Migration，AppHost SQL 初始化仅用于测试数据
 - 2026-04-15: 创建项目规范
 - 2026-04-15: 精简配置，移除重复内容

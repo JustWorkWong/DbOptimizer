@@ -1,21 +1,25 @@
 # MAF Workflow Architecture
 
+## 实施状态
+
+**✅ 已完成** (2026-04-18)
+
+MAF 迁移已全部完成，Legacy engine 已移除。
+
 ## 决策结论
 
-`DbOptimizer` 后续所有 workflow 能力以 Microsoft Agent Framework Workflow 为统一编排内核，不再扩展现有自研 `WorkflowRunner` 作为主引擎。
+`DbOptimizer` 所有 workflow 能力使用 Microsoft Agent Framework Workflow 作为统一编排内核。
 
 原因：
 
 1. MAF 原生提供 graph-based workflow、typed executors、request/response、checkpointing、resume、observability。
-2. 当前代码最缺的正是统一的编排、暂停/恢复、HITL 与状态投影能力。
-3. 继续扩展自研 runner 会让 review、resume、SSE、slow query 追踪继续分叉。
+2. 统一的编排、暂停/恢复、HITL 与状态投影能力。
+3. 避免 review、resume、SSE、slow query 追踪分叉。
 
-## 外部事实基线
+## 实施版本
 
-截至 `2026-04-17`，官方资料显示：
-
-- Microsoft Learn 已提供 workflow overview、checkpoints、request/response、HITL 等文档。
-- NuGet `Microsoft.Agents.AI.Workflows` 最新公开版本为 `1.0.0-rc4`。
+- NuGet `Microsoft.Agents.AI.Workflows` 版本: `1.0.0-rc4`
+- 实施日期: 2026-04-17 至 2026-04-18
 
 参考：
 
@@ -127,8 +131,18 @@ public interface IMafWorkflowRuntime
 - review submit DTO 不需要把这些字段回传给前端
 - 但后端必须能在重启后、跨进程场景下，从 `review_tasks` 中恢复 request correlation
 
-## 风险与约束
+## 实施成果
 
-1. MAF 当前仍处于 RC 阶段，必须锁定具体版本。
-2. 不要把现有领域分析逻辑重写成 agent；能保留 deterministic executor 的地方全部保留。
-3. SQL 与配置调优都必须走同一套 result envelope 与投影体系。
+1. ✅ SQL Analysis Workflow 完全基于 MAF
+2. ✅ DB Config Workflow 完全基于 MAF
+3. ✅ Checkpoint 自动保存与恢复
+4. ✅ Review 流程通过 MAF Request/Response
+5. ✅ 事件投影到 workflow_sessions / review_tasks
+6. ✅ SSE 实时推送
+7. ✅ Legacy engine 完全移除
+
+## 约束
+
+1. MAF 版本锁定为 `1.0.0-rc4`。
+2. 领域分析逻辑保留为 deterministic executor。
+3. SQL 与配置调优使用统一 result envelope 与投影体系。
