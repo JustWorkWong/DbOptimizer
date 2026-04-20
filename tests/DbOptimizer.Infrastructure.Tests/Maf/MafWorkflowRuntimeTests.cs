@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using DbOptimizer.Infrastructure.Maf.Runtime;
 using DbOptimizer.Infrastructure.Persistence;
@@ -20,6 +21,7 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
     private readonly Mock<IMafWorkflowFactory> _workflowFactoryMock;
     private readonly Mock<IMafRunStateStore> _runStateStoreMock;
     private readonly Mock<IWorkflowEventPublisher> _eventPublisherMock;
+    private readonly IWorkflowExecutionConcurrencyGate _concurrencyGate;
     private readonly MafWorkflowRuntime _runtime;
 
     public MafWorkflowRuntimeTests()
@@ -40,6 +42,14 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
         // Mock RunStateStore
         _runStateStoreMock = new Mock<IMafRunStateStore>();
         _eventPublisherMock = new Mock<IWorkflowEventPublisher>();
+        _concurrencyGate = new WorkflowExecutionConcurrencyGate(
+            new WorkflowExecutionOptions
+            {
+                MaxConcurrentRuns = 10,
+                MaxConcurrentSqlRuns = 10,
+                MaxConcurrentConfigRuns = 10
+            },
+            NullLogger<WorkflowExecutionConcurrencyGate>.Instance);
 
         var options = new MafWorkflowRuntimeOptions();
         var loggerFactoryMock = new Mock<ILoggerFactory>();
@@ -56,7 +66,8 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
                 Mock.Of<ILogger<MafJsonCheckpointStore>>())),
             options,
             loggerFactoryMock.Object,
-            _eventPublisherMock.Object);
+            _eventPublisherMock.Object,
+            _concurrencyGate);
     }
 
     [Fact]
@@ -204,6 +215,50 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
 
         // Assert
         _workflowFactoryMock.Verify(x => x.BuildSqlAnalysisWorkflow(), Times.Once);
+    }
+
+    [Fact]
+    public async Task StartSqlAnalysisAsync_WhenConcurrencyLimitReached_ThrowsWorkflowExecutionThrottledException()
+    {
+        var limitedGate = new WorkflowExecutionConcurrencyGate(
+            new WorkflowExecutionOptions
+            {
+                MaxConcurrentRuns = 1,
+                MaxConcurrentSqlRuns = 1,
+                MaxConcurrentConfigRuns = 1
+            },
+            NullLogger<WorkflowExecutionConcurrencyGate>.Instance);
+
+        var loggerFactoryMock = new Mock<ILoggerFactory>();
+        var loggerMock = new Mock<ILogger<MafWorkflowRuntime>>();
+        loggerFactoryMock.Setup(x => x.CreateLogger(It.IsAny<string>()))
+            .Returns(loggerMock.Object);
+
+        var runtime = new MafWorkflowRuntime(
+            _workflowFactoryMock.Object,
+            _runStateStoreMock.Object,
+            _dbContextFactoryMock.Object,
+            CheckpointManager.CreateJson(new MafJsonCheckpointStore(
+                _runStateStoreMock.Object,
+                Mock.Of<ILogger<MafJsonCheckpointStore>>())),
+            new MafWorkflowRuntimeOptions(),
+            loggerFactoryMock.Object,
+            _eventPublisherMock.Object,
+            limitedGate);
+
+        using var lease = limitedGate.Acquire("sql_analysis");
+
+        var sessionId = Guid.NewGuid();
+        var command = new SqlAnalysisWorkflowCommand(
+            SessionId: sessionId,
+            SqlText: "SELECT * FROM users",
+            DatabaseType: "mysql",
+            SchemaName: null);
+
+        var exception = await Assert.ThrowsAsync<WorkflowExecutionThrottledException>(
+            () => runtime.StartSqlAnalysisAsync(command));
+
+        Assert.Equal("sql_analysis", exception.WorkflowType);
     }
 
     [Fact]

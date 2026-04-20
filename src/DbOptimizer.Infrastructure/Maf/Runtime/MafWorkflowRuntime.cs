@@ -25,6 +25,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
     private readonly MafSqlWorkflowStarter _sqlStarter;
     private readonly MafConfigWorkflowStarter _configStarter;
     private readonly CheckpointManager _checkpointManager;
+    private readonly IWorkflowExecutionConcurrencyGate _concurrencyGate;
 
     public MafWorkflowRuntime(
         IMafWorkflowFactory workflowFactory,
@@ -33,7 +34,8 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
         CheckpointManager checkpointManager,
         MafWorkflowRuntimeOptions options,
         ILoggerFactory loggerFactory,
-        IWorkflowEventPublisher eventPublisher)
+        IWorkflowEventPublisher eventPublisher,
+        IWorkflowExecutionConcurrencyGate concurrencyGate)
     {
         _workflowFactory = workflowFactory ?? throw new ArgumentNullException(nameof(workflowFactory));
         _runStateStore = runStateStore ?? throw new ArgumentNullException(nameof(runStateStore));
@@ -42,6 +44,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
         _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
+        _concurrencyGate = concurrencyGate ?? throw new ArgumentNullException(nameof(concurrencyGate));
         _logger = loggerFactory.CreateLogger<MafWorkflowRuntime>();
 
         _errorHandler = new MafGlobalErrorHandler(
@@ -93,36 +96,80 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
         SqlAnalysisWorkflowCommand command,
         CancellationToken cancellationToken = default)
     {
-        var start = await _sqlStarter.PrepareStartAsync(command, cancellationToken);
+        WorkflowExecutionLease? lease = null;
 
-        RunInBackground(
-            ct => _sqlStarter.ExecutePreparedStartAsync(start, ct),
-            ex => _errorHandler.HandleWorkflowErrorAsync(
-                start.SessionId,
-                ex,
-                currentStep: "workflow_execution",
-                CancellationToken.None),
-            $"Unhandled exception in background SQL workflow task. SessionId={start.SessionId}, RunId={start.RunId}");
+        try
+        {
+            lease = _concurrencyGate.Acquire("sql_analysis");
+            var start = await _sqlStarter.PrepareStartAsync(command, cancellationToken);
 
-        return start.Response;
+            RunInBackground(
+                async ct =>
+                {
+                    try
+                    {
+                        await _sqlStarter.ExecutePreparedStartAsync(start, ct);
+                    }
+                    finally
+                    {
+                        lease.Dispose();
+                    }
+                },
+                ex => _errorHandler.HandleWorkflowErrorAsync(
+                    start.SessionId,
+                    ex,
+                    currentStep: "workflow_execution",
+                    CancellationToken.None),
+                $"Unhandled exception in background SQL workflow task. SessionId={start.SessionId}, RunId={start.RunId}");
+
+            lease = null;
+            return start.Response;
+        }
+        catch
+        {
+            lease?.Dispose();
+            throw;
+        }
     }
 
     public async Task<WorkflowStartResponse> StartDbConfigOptimizationAsync(
         DbConfigWorkflowCommand command,
         CancellationToken cancellationToken = default)
     {
-        var start = await _configStarter.PrepareStartAsync(command, cancellationToken);
+        WorkflowExecutionLease? lease = null;
 
-        RunInBackground(
-            ct => _configStarter.ExecutePreparedStartAsync(start, ct),
-            ex => _errorHandler.HandleWorkflowErrorAsync(
-                start.SessionId,
-                ex,
-                currentStep: "workflow_execution",
-                CancellationToken.None),
-            $"Unhandled exception in background DB config workflow task. SessionId={start.SessionId}, RunId={start.RunId}");
+        try
+        {
+            lease = _concurrencyGate.Acquire("db_config_optimization");
+            var start = await _configStarter.PrepareStartAsync(command, cancellationToken);
 
-        return start.Response;
+            RunInBackground(
+                async ct =>
+                {
+                    try
+                    {
+                        await _configStarter.ExecutePreparedStartAsync(start, ct);
+                    }
+                    finally
+                    {
+                        lease.Dispose();
+                    }
+                },
+                ex => _errorHandler.HandleWorkflowErrorAsync(
+                    start.SessionId,
+                    ex,
+                    currentStep: "workflow_execution",
+                    CancellationToken.None),
+                $"Unhandled exception in background DB config workflow task. SessionId={start.SessionId}, RunId={start.RunId}");
+
+            lease = null;
+            return start.Response;
+        }
+        catch
+        {
+            lease?.Dispose();
+            throw;
+        }
     }
 
     public async Task<WorkflowResumeResponse> ResumeAsync(
@@ -130,6 +177,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
         CancellationToken cancellationToken = default)
     {
         var (session, runState, workflow) = await LoadResumeContextAsync(sessionId, cancellationToken);
+        using var lease = _concurrencyGate.Acquire(session.WorkflowType);
 
         session.Status = WorkflowSessionStatus.Running;
         session.UpdatedAt = DateTimeOffset.UtcNow;
@@ -264,6 +312,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
         ArgumentNullException.ThrowIfNull(reviewResponse);
 
         var (session, runState, workflow) = await LoadResumeContextAsync(sessionId, cancellationToken);
+        using var lease = _concurrencyGate.Acquire(session.WorkflowType);
         _logger.LogInformation(
             "Resuming workflow with review response. SessionId={SessionId}, WorkflowType={WorkflowType}, RunId={RunId}, CheckpointId={CheckpointId}",
             sessionId,

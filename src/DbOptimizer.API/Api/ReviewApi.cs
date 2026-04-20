@@ -79,6 +79,22 @@ internal static class ReviewApiRouteBuilderExtensions
                 var response = await reviewApplicationService.SubmitAsync(taskId, request, cancellationToken);
                 return ApiEnvelopeFactory.Success(httpContext, response);
             }
+            catch (WorkflowExecutionThrottledException ex)
+            {
+                return ApiEnvelopeFactory.Failure(
+                    httpContext,
+                    StatusCodes.Status429TooManyRequests,
+                    "WORKFLOW_CONCURRENCY_LIMIT_REACHED",
+                    ex.Message,
+                    new
+                    {
+                        ex.WorkflowType,
+                        ex.TotalLimit,
+                        ex.WorkflowTypeLimit,
+                        ex.TotalActiveRuns,
+                        ex.WorkflowTypeActiveRuns
+                    });
+            }
             catch (ApiException ex)
             {
                 return ApiEnvelopeFactory.Failure(httpContext, ex.StatusCode, ex.Code, ex.Message, ex.Details);

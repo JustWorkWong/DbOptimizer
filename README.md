@@ -235,4 +235,5 @@ MIT License
 ## Native Runtime Status
 
 - 2026-04-21: The main workflow path now runs on native MAF checkpoint + native review request/response resume + unified event projection/logging.
-- Remaining work is governance cleanup (feature flags/concurrency/legacy session tooling) rather than missing native-runtime main-path functionality.
+- 2026-04-21: Launch governance is now in place via explicit `WorkflowExecution` native flags and runtime concurrency rejection.
+- Legacy-session tooling is intentionally skipped because this project has not started using the old runtime in production.
