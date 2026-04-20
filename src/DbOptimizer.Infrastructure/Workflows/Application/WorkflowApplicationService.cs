@@ -195,18 +195,6 @@ public sealed class WorkflowApplicationService(
         };
     }
 
-    public async Task<WorkflowResumeResponse> ResumeAsync(Guid sessionId, CancellationToken cancellationToken = default)
-    {
-        // 委托给 MAF Runtime
-        var mafResponse = await mafWorkflowRuntime.ResumeAsync(sessionId, cancellationToken);
-
-        return new WorkflowResumeResponse(
-            mafResponse.SessionId,
-            "Unknown", // MAF Runtime 不返回 WorkflowType，需要从数据库查询
-            "maf",
-            mafResponse.Status);
-    }
-
     public async Task<WorkflowCancelResponse> CancelAsync(Guid sessionId, CancellationToken cancellationToken = default)
     {
         // 委托给 MAF Runtime

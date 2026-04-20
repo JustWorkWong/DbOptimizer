@@ -512,20 +512,6 @@ internal sealed class ObservedExecutor<TInput, TOutput>(
                 cancellationToken: cancellationToken);
             return output;
         }
-        catch (Exception ex) when (IsSuspended(ex))
-        {
-            await instrumentation.OnCompletedAsync(
-                workflowType,
-                innerExecutor.Id,
-                message!,
-                new { suspended = true, reason = ex.Message },
-                startedAt,
-                DateTimeOffset.UtcNow,
-                waitingForReview: true,
-                executionId: executionId,
-                cancellationToken: cancellationToken);
-            throw;
-        }
         catch (Exception ex)
         {
             await instrumentation.OnFailedAsync(
@@ -539,11 +525,6 @@ internal sealed class ObservedExecutor<TInput, TOutput>(
                 cancellationToken);
             throw;
         }
-    }
-
-    private static bool IsSuspended(Exception exception)
-    {
-        return string.Equals(exception.GetType().Name, "WorkflowSuspendedException", StringComparison.Ordinal);
     }
 }
 

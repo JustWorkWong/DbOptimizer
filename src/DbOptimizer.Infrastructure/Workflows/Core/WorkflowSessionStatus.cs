@@ -10,6 +10,7 @@ public static class WorkflowSessionStatus
 
     public static bool IsWaitingForReview(string? status)
     {
+        // Keep read compatibility for historical sessions persisted before PR-F cleanup.
         return string.Equals(status, WaitingForReview, StringComparison.OrdinalIgnoreCase)
                || string.Equals(status, "WaitingReview", StringComparison.OrdinalIgnoreCase)
                || string.Equals(status, "suspended", StringComparison.OrdinalIgnoreCase);

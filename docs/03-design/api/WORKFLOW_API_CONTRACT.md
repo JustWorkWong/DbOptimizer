@@ -153,13 +153,11 @@ public sealed record WorkflowStatusResponse(
 }
 ```
 
-## `POST /api/workflows/{sessionId}/resume`
+## Review Resume Semantics
 
-### 语义
-
-- 对 `WaitingForReview` 不能直接 resume；必须先提交 review response。
-- 对 `Failed` 可在支持的场景下 resume。
-- 对 `Cancelled` 不允许 resume。
+- Public workflow API no longer exposes `POST /api/workflows/{sessionId}/resume`.
+- When a workflow is in `WaitingForReview`, continuation happens through review submission, which resumes the native MAF run with review responses.
+- `POST /api/workflows/{sessionId}/cancel` remains the public interruption endpoint.
 
 ## 后端类拆分
 
@@ -169,7 +167,6 @@ API DTO 文件：
 - `src/DbOptimizer.API/Contracts/Workflows/CreateDbConfigOptimizationWorkflowRequest.cs`
 - `src/DbOptimizer.API/Contracts/Workflows/WorkflowStatusResponse.cs`
 - `src/DbOptimizer.API/Contracts/Workflows/WorkflowStartResponse.cs`
-- `src/DbOptimizer.API/Contracts/Workflows/WorkflowResumeResponse.cs`
 - `src/DbOptimizer.API/Contracts/Workflows/WorkflowCancelResponse.cs`
 
 Application Service：
@@ -180,7 +177,6 @@ public interface IWorkflowApplicationService
     Task<WorkflowStartResponse> StartSqlAnalysisAsync(CreateSqlAnalysisWorkflowRequest request, CancellationToken cancellationToken = default);
     Task<WorkflowStartResponse> StartDbConfigOptimizationAsync(CreateDbConfigOptimizationWorkflowRequest request, CancellationToken cancellationToken = default);
     Task<WorkflowStatusResponse?> GetAsync(Guid sessionId, CancellationToken cancellationToken = default);
-    Task<WorkflowResumeResponse> ResumeAsync(Guid sessionId, CancellationToken cancellationToken = default);
     Task<WorkflowCancelResponse> CancelAsync(Guid sessionId, CancellationToken cancellationToken = default);
 }
 ```

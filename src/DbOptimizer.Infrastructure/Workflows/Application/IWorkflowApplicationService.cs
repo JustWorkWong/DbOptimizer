@@ -29,13 +29,6 @@ public interface IWorkflowApplicationService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 恢复 Workflow
-    /// </summary>
-    Task<WorkflowResumeResponse> ResumeAsync(
-        Guid sessionId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// 取消 Workflow
     /// </summary>
     Task<WorkflowCancelResponse> CancelAsync(
@@ -70,15 +63,6 @@ public sealed record WorkflowStatusResponse(
     WorkflowReviewSummaryDto? Review,
     WorkflowResultEnvelope? Result,
     WorkflowErrorDto? Error);
-
-/// <summary>
-/// Workflow 恢复响应
-/// </summary>
-public sealed record WorkflowResumeResponse(
-    Guid SessionId,
-    string WorkflowType,
-    string EngineType,
-    string Status);
 
 /// <summary>
 /// Workflow 取消响应

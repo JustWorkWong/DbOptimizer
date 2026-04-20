@@ -231,3 +231,8 @@ MIT License
 - [Element Plus](https://element-plus.org/)
 - [Supabase Index Advisor](https://github.com/supabase/index_advisor)
 
+
+## Native Runtime Status
+
+- 2026-04-21: The main workflow path now runs on native MAF checkpoint + native review request/response resume + unified event projection/logging.
+- Remaining work is governance cleanup (feature flags/concurrency/legacy session tooling) rather than missing native-runtime main-path functionality.

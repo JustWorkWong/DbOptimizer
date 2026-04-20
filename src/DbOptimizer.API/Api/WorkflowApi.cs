@@ -20,7 +20,6 @@ internal static class WorkflowApiRouteBuilderExtensions
         group.MapPost("/db-config-optimization", HandleCreateDbConfigOptimizationAsync);
         group.MapGet("/{sessionId:guid}", HandleGetWorkflowAsync);
         group.MapPost("/{sessionId:guid}/cancel", HandleCancelWorkflowAsync);
-        group.MapPost("/{sessionId:guid}/resume", HandleResumeWorkflowAsync);
 
         return endpoints;
     }
@@ -116,24 +115,4 @@ internal static class WorkflowApiRouteBuilderExtensions
         }
     }
 
-    private static async Task<IResult> HandleResumeWorkflowAsync(
-        Guid sessionId,
-        IWorkflowApplicationService workflowApplicationService,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var response = await workflowApplicationService.ResumeAsync(sessionId, cancellationToken);
-            return ApiEnvelopeFactory.Success(httpContext, response);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return ApiEnvelopeFactory.Failure(httpContext, StatusCodes.Status400BadRequest, "INVALID_OPERATION", ex.Message, null);
-        }
-        catch (ApiException ex)
-        {
-            return ApiEnvelopeFactory.Failure(httpContext, ex.StatusCode, ex.Code, ex.Message, ex.Details);
-        }
-    }
 }

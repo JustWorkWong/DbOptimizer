@@ -1,5 +1,15 @@
 # MAF Native Runtime Refactor Task Checklist
 
+## Execution Status (2026-04-21)
+
+- [x] PR-A completed
+- [x] PR-B completed
+- [x] PR-C completed
+- [x] PR-D completed
+- [x] PR-E completed
+- [x] PR-F completed
+- [ ] Follow-up governance items (feature-flag defaults, concurrency policy, legacy session tooling) remain for later dedicated tasks
+
 > 基于 [MAF_NATIVE_RUNTIME_REFACTOR_PLAN.md](./MAF_NATIVE_RUNTIME_REFACTOR_PLAN.md) 与当前代码现状整理  
 > 更新时间：2026-04-20  
 > 适用范围：`DbOptimizer` 当前 MAF runtime 主链路重构

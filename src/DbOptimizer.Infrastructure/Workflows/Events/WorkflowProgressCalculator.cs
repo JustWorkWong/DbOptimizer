@@ -48,7 +48,7 @@ public sealed class WorkflowProgressCalculator : IWorkflowProgressCalculator
         return status switch
         {
             "Running" => baseProgress + stepProgress / 2,
-            "Completed" or "WaitingReview" => baseProgress + stepProgress,
+            "Completed" or "WaitingForReview" => baseProgress + stepProgress,
             _ => baseProgress
         };
     }

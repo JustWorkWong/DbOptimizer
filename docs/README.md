@@ -29,3 +29,7 @@
 - 必须使用 Microsoft Agent Framework Workflow 功能完成工作流重构。
 - 详细设计以 `03-design/` 为准，不能再直接以 archive 中旧文档为实现依据。
 - AI 派发任务时，以 `04-implementation/README.md` 为入口，以 `04-implementation/AI_EXECUTION_PLAYBOOK.md` 为执行规则。
+
+MAF native runtime status (2026-04-21):
+- Main path is already on native checkpoint + native review resume + unified event projection/logging.
+- docs/04-implementation/MAF_NATIVE_RUNTIME_REFACTOR_PLAN.md now tracks cleanup/governance follow-ups in addition to historical migration context.

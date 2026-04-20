@@ -192,36 +192,6 @@ public sealed class WorkflowApplicationServiceTests
 
     #endregion
 
-    #region ResumeAsync Tests
-
-    [Fact]
-    public async Task ResumeAsync_CallsMafRuntime()
-    {
-        // Arrange
-        var sessionId = Guid.NewGuid();
-        var expectedResponse = new DbOptimizer.Infrastructure.Maf.Runtime.WorkflowResumeResponse(
-            SessionId: sessionId,
-            Status: "running");
-
-        _mafRuntimeMock.Setup(x => x.ResumeAsync(sessionId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(expectedResponse);
-
-        // Act
-        var response = await _service.ResumeAsync(sessionId);
-
-        // Assert
-        Assert.NotNull(response);
-        Assert.Equal(sessionId, response.SessionId);
-        Assert.Equal("running", response.Status);
-
-        // 验证调用了 MAF Runtime
-        _mafRuntimeMock.Verify(
-            x => x.ResumeAsync(sessionId, It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
-
-    #endregion
-
     #region CancelAsync Tests
 
     [Fact]

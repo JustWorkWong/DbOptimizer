@@ -86,6 +86,8 @@ public interface IMafWorkflowRuntime
 }
 ```
 
+Note: `ResumeAsync` remains an internal runtime capability. The public workflow API resumes review-gated runs through review submission rather than a standalone `/api/workflows/{sessionId}/resume` endpoint.
+
 ## HITL 方案
 
 本项目不再使用“自定义 while 等待 + 轮询 review 表”的旧方案，改为：
