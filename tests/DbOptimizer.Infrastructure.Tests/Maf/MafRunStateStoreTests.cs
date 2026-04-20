@@ -17,6 +17,7 @@ public sealed class MafRunStateStoreTests : IDisposable
     private readonly DbContextOptions<DbOptimizerDbContext> _dbOptions;
     private readonly Mock<IConnectionMultiplexer> _redisMock;
     private readonly Mock<IDatabase> _redisDatabaseMock;
+    private readonly Mock<IBatch> _redisBatchMock;
     private readonly Mock<IDbContextFactory<DbOptimizerDbContext>> _dbContextFactoryMock;
     private readonly MafRunStateStore _store;
 
@@ -29,9 +30,12 @@ public sealed class MafRunStateStoreTests : IDisposable
 
         // Mock Redis
         _redisDatabaseMock = new Mock<IDatabase>();
+        _redisBatchMock = new Mock<IBatch>();
         _redisMock = new Mock<IConnectionMultiplexer>();
         _redisMock.Setup(x => x.GetDatabase(It.IsAny<int>(), It.IsAny<object>()))
             .Returns(_redisDatabaseMock.Object);
+        _redisDatabaseMock.Setup(x => x.CreateBatch(It.IsAny<object?>()))
+            .Returns(_redisBatchMock.Object);
 
         // Mock DbContextFactory - 每次调用都创建新的 DbContext
         _dbContextFactoryMock = new Mock<IDbContextFactory<DbOptimizerDbContext>>();
@@ -107,27 +111,39 @@ public sealed class MafRunStateStoreTests : IDisposable
         var runId = "run_123";
         var checkpointRef = "checkpoint_ref_123";
         var engineState = "{\"step\":1}";
+        RedisValue cachedValue = RedisValue.Null;
 
-        _redisDatabaseMock.Setup(x => x.StringSetAsync(
+        _redisBatchMock.Setup(x => x.StringSetAsync(
             It.IsAny<RedisKey>(),
             It.IsAny<RedisValue>(),
             It.IsAny<TimeSpan?>(),
             It.IsAny<bool>(),
             It.IsAny<When>(),
             It.IsAny<CommandFlags>()))
+            .Callback<RedisKey, RedisValue, TimeSpan?, bool, When, CommandFlags>(
+                (_, value, _, _, _, _) => cachedValue = value)
             .ReturnsAsync(true);
 
         // Act
         await _store.SaveAsync(sessionId, runId, checkpointRef, engineState);
 
         // Assert
-        _redisDatabaseMock.Verify(x => x.StringSetAsync(
+        _redisBatchMock.Verify(x => x.StringSetAsync(
             It.Is<RedisKey>(k => k.ToString().Contains(sessionId.ToString("N"))),
             It.IsAny<RedisValue>(),
             It.Is<TimeSpan?>(ttl => ttl == TimeSpan.FromHours(24)),
             It.IsAny<bool>(),
             It.IsAny<When>(),
             It.IsAny<CommandFlags>()), Times.Once);
+        _redisBatchMock.Verify(x => x.Execute(), Times.Once);
+        Assert.True(cachedValue.HasValue);
+
+        var cachedState = JsonSerializer.Deserialize<MafRunState>(cachedValue.ToString());
+        Assert.NotNull(cachedState);
+        Assert.Equal(sessionId, cachedState.SessionId);
+        Assert.Equal(runId, cachedState.RunId);
+        Assert.Equal(checkpointRef, cachedState.CheckpointRef);
+        Assert.Equal(engineState, cachedState.EngineState);
     }
 
     [Fact]
@@ -210,6 +226,14 @@ public sealed class MafRunStateStoreTests : IDisposable
         Assert.Equal(sessionId, result.SessionId);
         Assert.Equal("run_123", result.RunId);
         Assert.Equal("checkpoint_ref_123", result.CheckpointRef);
+        _redisBatchMock.Verify(x => x.StringSetAsync(
+            It.Is<RedisKey>(k => k.ToString().Contains(sessionId.ToString("N"))),
+            It.IsAny<RedisValue>(),
+            It.Is<TimeSpan?>(ttl => ttl == TimeSpan.FromHours(24)),
+            It.IsAny<bool>(),
+            It.IsAny<When>(),
+            It.IsAny<CommandFlags>()), Times.Once);
+        _redisBatchMock.Verify(x => x.Execute(), Times.Once);
     }
 
     [Fact]
@@ -370,7 +394,7 @@ public sealed class MafRunStateStoreTests : IDisposable
         var engineState = "{\"step\":1}";
 
         // Redis 写入失败
-        _redisDatabaseMock.Setup(x => x.StringSetAsync(
+        _redisBatchMock.Setup(x => x.StringSetAsync(
             It.IsAny<RedisKey>(),
             It.IsAny<RedisValue>(),
             It.IsAny<TimeSpan?>(),

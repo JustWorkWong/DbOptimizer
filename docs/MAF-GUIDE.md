@@ -1,6 +1,7 @@
 # Microsoft Agent Framework (MAF) 完整指南
 
-> **版本**: MAF 1.0.0-rc4 | **.NET**: 10 | **更新日期**: 2026-04-20
+> **版本**: MAF 1.1.0 | **.NET**: 10 | **更新日期**: 2026-04-20
+> **说明**: 本文档同时包含 MAF 概念示例和项目落地方向。当前 `DbOptimizer` 已完成 MAF 1.1.0 基线升级与最小原生互操作测试，但原生 checkpoint / review request-response / resume 主链路仍在重构中，不能把文中的目标态示例直接视为“仓库当前已全部实现”。
 
 ## 📋 目录
 
@@ -81,7 +82,7 @@ Final Output (string)
 ### 1. 安装依赖
 
 ```bash
-dotnet add package Microsoft.Agents.AI --version 1.0.0-rc4
+dotnet add package Microsoft.Agents.AI --version 1.1.0
 dotnet add package Microsoft.Extensions.AI
 ```
 
@@ -804,7 +805,7 @@ CREATE TABLE prompt_versions (
 - **官方文档**: https://learn.microsoft.com/en-us/agent-framework
 - **GitHub**: https://github.com/microsoft/agent-framework
 - **示例代码**: https://github.com/microsoft/agent-framework-samples
-- **NuGet**: `Microsoft.Agents.AI` (1.0.0-rc4)
+- **NuGet**: `Microsoft.Agents.AI` (1.1.0)
 
 ---
 
@@ -824,4 +825,4 @@ MAF 的核心理念：
 - ✅ 使用 `StreamingRun` 而不是自己实现事件流
 - ✅ 使用 `Checkpoint` 而不是自己实现状态保存
 
-遵循本文档，你的 DbOptimizer 项目将完全符合 MAF 最佳实践！
+遵循本文档并完成 native runtime refactor 后，DbOptimizer 才会更接近本文描述的 MAF 最佳实践目标态。

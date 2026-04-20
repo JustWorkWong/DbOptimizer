@@ -4,6 +4,10 @@
 
 基于 Microsoft Agent Framework (MAF) 构建的智能数据库优化工具，通过多 Agent 协作提供深度的性能分析和优化建议。
 
+> 状态说明（2026-04-20）
+> 当前仓库已经完成 MAF `1.1.0` 基线升级，以及最小 `ExternalRequest/PendingRequests/ResumeStreamingAsync` 互操作验证；
+> 但原生 checkpoint / review request-response / resume 生命周期尚未完全接入主业务链路，相关重构仍在进行中。
+
 ---
 
 ## 核心特性
@@ -13,13 +17,13 @@
 - **数据库层调优**：参数配置 + 资源分析 + 负载特征
 - **人工审核**：所有 AI 建议必须人工审核，驳回后回流重跑
 - **置信度 + 证据链**：每个建议都带置信度、原因、证据引用
-- **Workflow Checkpoint**：支持暂停/恢复，断点续跑
+- **Workflow Checkpoint**：已具备基础字段与互操作验证，原生暂停/恢复主链路仍在重构中
 
 ### 🔍 透明化 AI 过程
 - 实时显示 Agent 工作过程（SSE 推送）
 - 展示工具调用（Function Calling）
 - 展示 AI 决策推理链
-- 完整的执行记录 + MAF Checkpoint 持久化
+- 完整的执行记录；MAF 原生 checkpoint 持久化主链路仍在重构中
 
 ### 📊 慢查询分析
 - 手工输入 SQL 分析
@@ -181,8 +185,8 @@ WHERE u.created_at > '2024-01-01'
 - [x] MySQL & PostgreSQL MCP 接入
 - [x] SQL 调优工作流（基于 MAF）
 - [x] 数据库层调优工作流（基于 MAF）
-- [x] 人工审核 + 驳回回流（MAF Request/Response）
-- [x] Agent 持久化 + MAF Workflow checkpoint
+- [ ] 人工审核 + 驳回回流（MAF 原生 Request/Response 主链路重构中）
+- [ ] Agent 持久化 + MAF Workflow checkpoint（原生 checkpoint 主链路重构中）
 - [x] 历史任务与版本查看
 - [x] Vue 3 前端 + SSE 实时推送
 - [ ] 慢 SQL 自动抓取与分析

@@ -53,6 +53,7 @@ public sealed class MafWorkflowFactoryTests
         services.AddSingleton(Mock.Of<IConfigCollectionProvider>());
         services.AddSingleton(Mock.Of<IConfigRuleEngine>());
         services.AddSingleton(Mock.Of<IConfigReviewAdjustmentService>());
+        services.AddSingleton(Mock.Of<IMafExecutorInstrumentation>());
 
         // 注册 Logger
         services.AddLogging();
