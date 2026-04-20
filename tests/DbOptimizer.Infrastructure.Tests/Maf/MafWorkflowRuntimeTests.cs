@@ -347,7 +347,8 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
     {
         // Arrange
         var sessionId = Guid.NewGuid();
-        var runId = $"maf_run_{Guid.NewGuid():N}";
+        var workflow = CreateSuspendedWorkflow();
+        var runState = await SeedPendingCheckpointAsync(sessionId, workflow, "Approve SQL rewrite?");
 
         // 创建 suspended session
         await using (var dbContext = new DbOptimizerDbContext(_dbOptions))
@@ -359,8 +360,8 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
                 Status = "suspended",
                 State = "{}",
                 EngineType = "maf",
-                EngineRunId = runId,
-                EngineCheckpointRef = $"review-gate-{sessionId}",
+                EngineRunId = runState.RunId,
+                EngineCheckpointRef = runState.CheckpointRef,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
@@ -368,20 +369,9 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
             await dbContext.SaveChangesAsync();
         }
 
-        // Mock run state
-        var runState = new MafRunState(
-            SessionId: sessionId,
-            RunId: runId,
-            CheckpointRef: $"review-gate-{sessionId}",
-            EngineState: "{}",
-            CreatedAt: DateTime.UtcNow);
-
-        _runStateStoreMock.Setup(x => x.GetAsync(sessionId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(runState);
-
         // Mock workflow factory
         _workflowFactoryMock.Setup(x => x.BuildSqlAnalysisWorkflow())
-            .Returns((Workflow)null!);
+            .Returns(workflow);
 
         // Act
         var response = await _runtime.ResumeAsync(sessionId);
@@ -389,13 +379,13 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
         // Assert
         Assert.NotNull(response);
         Assert.Equal(sessionId, response.SessionId);
-        Assert.Equal("running", response.Status);
+        Assert.Equal("suspended", response.Status);
 
         // 验证 session 状态已更新
         await using var verifyContext = new DbOptimizerDbContext(_dbOptions);
         var updatedSession = await verifyContext.WorkflowSessions.FindAsync(sessionId);
         Assert.NotNull(updatedSession);
-        Assert.Equal("running", updatedSession.Status);
+        Assert.Equal("suspended", updatedSession.Status);
     }
 
     [Fact]
@@ -438,7 +428,7 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => _runtime.ResumeAsync(sessionId));
 
-        Assert.Contains("not suspended", exception.Message);
+        Assert.Contains("not waiting for review", exception.Message);
     }
 
     [Fact]
@@ -481,7 +471,8 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
     {
         // Arrange
         var sessionId = Guid.NewGuid();
-        var runId = $"maf_run_{Guid.NewGuid():N}";
+        var workflow = CreateSuspendedWorkflow();
+        var runState = await SeedPendingCheckpointAsync(sessionId, workflow, "Approve config tuning?");
 
         // 创建 suspended db_config session
         await using (var dbContext = new DbOptimizerDbContext(_dbOptions))
@@ -493,7 +484,8 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
                 Status = "suspended",
                 State = "{}",
                 EngineType = "maf",
-                EngineRunId = runId,
+                EngineRunId = runState.RunId,
+                EngineCheckpointRef = runState.CheckpointRef,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
@@ -501,20 +493,9 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
             await dbContext.SaveChangesAsync();
         }
 
-        // Mock run state
-        var runState = new MafRunState(
-            SessionId: sessionId,
-            RunId: runId,
-            CheckpointRef: $"review-gate-{sessionId}",
-            EngineState: "{}",
-            CreatedAt: DateTime.UtcNow);
-
-        _runStateStoreMock.Setup(x => x.GetAsync(sessionId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(runState);
-
         // Mock workflow factory
         _workflowFactoryMock.Setup(x => x.BuildDbConfigWorkflow())
-            .Returns((Workflow)null!);
+            .Returns(workflow);
 
         // Act
         await _runtime.ResumeAsync(sessionId);
@@ -832,6 +813,74 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
             .Build();
     }
 
+    private async Task<MafRunState> SeedPendingCheckpointAsync(Guid sessionId, Workflow workflow, string requestPayload)
+    {
+        MafRunState? state = null;
+
+        _runStateStoreMock
+            .Setup(x => x.GetAsync(sessionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => state);
+
+        _runStateStoreMock
+            .Setup(x => x.SaveAsync(
+                sessionId,
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Guid, string, string, string, CancellationToken>((sid, runId, checkpointRef, engineState, _) =>
+            {
+                state = new MafRunState(
+                    sid,
+                    runId,
+                    checkpointRef,
+                    engineState,
+                    DateTime.UtcNow);
+            })
+            .Returns(Task.CompletedTask);
+
+        var checkpointManager = CheckpointManager.CreateJson(new MafJsonCheckpointStore(
+            _runStateStoreMock.Object,
+            Mock.Of<ILogger<MafJsonCheckpointStore>>()));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        await using var run = await InProcessExecution.RunStreamingAsync(
+            workflow,
+            requestPayload,
+            checkpointManager,
+            sessionId: sessionId.ToString(),
+            cts.Token);
+
+        await foreach (var evt in run.WatchStreamAsync(cts.Token))
+        {
+            if (evt is RequestInfoEvent)
+            {
+                break;
+            }
+        }
+
+        await WaitForStatusAsync(run, RunStatus.PendingRequests, cts.Token);
+
+        if (state is null)
+        {
+            throw new InvalidOperationException("Failed to seed pending checkpoint for resume test.");
+        }
+
+        return state;
+    }
+
+    private static Workflow CreateSuspendedWorkflow()
+    {
+        var reviewPort = RequestPort.Create<string, bool>("review-port");
+        var finalizeExecutor = new ReviewDecisionExecutor();
+
+        return new WorkflowBuilder(reviewPort)
+            .AddEdge(reviewPort, finalizeExecutor)
+            .WithOutputFrom(finalizeExecutor)
+            .Build();
+    }
+
     private sealed class SqlNoOpExecutor : Executor<DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlAnalysisWorkflowCommand, string>
     {
         public SqlNoOpExecutor()
@@ -861,6 +910,36 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
             CancellationToken cancellationToken = default)
         {
             return ValueTask.FromResult($"config:{message.SessionId}");
+        }
+    }
+
+    private sealed class ReviewDecisionExecutor : Executor<bool, string>
+    {
+        public ReviewDecisionExecutor()
+            : base("review-decision")
+        {
+        }
+
+        public override ValueTask<string> HandleAsync(
+            bool message,
+            IWorkflowContext context,
+            CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromResult(message ? "approved" : "rejected");
+        }
+    }
+
+    private static async Task WaitForStatusAsync(StreamingRun run, RunStatus expected, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (await run.GetStatusAsync(cancellationToken) == expected)
+            {
+                return;
+            }
+
+            await Task.Delay(50, cancellationToken);
         }
     }
 }

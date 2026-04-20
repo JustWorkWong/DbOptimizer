@@ -126,4 +126,36 @@ public sealed class WorkflowReviewTaskGateway(
             taskId,
             status);
     }
+
+    public async Task UpdateCorrelationAsync(
+        Guid taskId,
+        string requestId,
+        string engineRunId,
+        string checkpointRef,
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var entity = await dbContext.ReviewTasks
+            .Where(x => x.TaskId == taskId)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (entity is null)
+        {
+            logger.LogWarning("Review task not found when updating correlation. TaskId={TaskId}", taskId);
+            return;
+        }
+
+        entity.RequestId = requestId;
+        entity.EngineRunId = engineRunId;
+        entity.EngineCheckpointRef = checkpointRef;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Review task correlation updated. TaskId={TaskId}, RequestId={RequestId}, RunId={RunId}, CheckpointRef={CheckpointRef}",
+            taskId,
+            requestId,
+            engineRunId,
+            checkpointRef);
+    }
 }

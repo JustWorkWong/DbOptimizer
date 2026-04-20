@@ -37,7 +37,8 @@ public sealed class WorkflowApplicationService(
             SessionId: sessionId,
             SqlText: request.SqlText.Trim(),
             DatabaseType: databaseEngine,
-            SchemaName: null);
+            SchemaName: null,
+            RequireHumanReview: request.Options.RequireHumanReview);
 
         var mafResponse = await mafWorkflowRuntime.StartSqlAnalysisAsync(command, cancellationToken);
 

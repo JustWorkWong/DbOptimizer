@@ -1,6 +1,5 @@
 using DbOptimizer.Core.Models;
-using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
-using DbOptimizer.Infrastructure.Maf.DbConfig;
+using Microsoft.Agents.AI.Workflows;
 
 namespace DbOptimizer.Infrastructure.Workflows.Review;
 
@@ -10,22 +9,18 @@ namespace DbOptimizer.Infrastructure.Workflows.Review;
  * ========================= */
 public interface IWorkflowReviewResponseFactory
 {
-    ReviewDecisionResponseMessage CreateSqlResponse(
+    ExternalResponse CreateSqlResponse(
         Guid sessionId,
         Guid taskId,
         string requestId,
-        string runId,
-        string checkpointRef,
         string action,
         string? comment,
         IReadOnlyDictionary<string, System.Text.Json.JsonElement> adjustments);
 
-    ConfigReviewDecisionResponseMessage CreateDbConfigResponse(
+    ExternalResponse CreateDbConfigResponse(
         Guid sessionId,
         Guid taskId,
         string requestId,
-        string runId,
-        string checkpointRef,
         string action,
         string? comment,
         IReadOnlyDictionary<string, System.Text.Json.JsonElement> adjustments);

@@ -32,6 +32,11 @@ public sealed record DbConfigOptimizationDraftReadyMessage(
     Guid SessionId,
     DbOptimizer.Core.Models.WorkflowResultEnvelope DraftResult);
 
+public sealed record ConfigReviewRequestMessage(
+    Guid SessionId,
+    Guid TaskId,
+    DbOptimizer.Core.Models.WorkflowResultEnvelope DraftResult);
+
 public sealed record DbConfigOptimizationCompletedMessage(
     Guid SessionId,
     DbOptimizer.Core.Models.WorkflowResultEnvelope FinalResult);
@@ -42,9 +47,6 @@ public sealed record DbConfigOptimizationCompletedMessage(
 public sealed record ConfigReviewDecisionResponseMessage(
     Guid SessionId,
     Guid TaskId,
-    string RequestId,
-    string RunId,
-    string CheckpointRef,
     string Action,
     string? Comment,
     IReadOnlyDictionary<string, JsonElement> Adjustments,

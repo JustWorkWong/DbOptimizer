@@ -6,6 +6,7 @@ using DbOptimizer.Infrastructure.Workflows;
 using DbOptimizer.Infrastructure.Workflows.Review;
 using DbOptimizer.Infrastructure.Maf.Runtime;
 using FluentValidation;
+using Microsoft.Agents.AI.Workflows;
 using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.API.Api;
@@ -333,8 +334,21 @@ internal sealed class ReviewApplicationService(
 
         var reviewedAt = DateTimeOffset.UtcNow;
         var adjustments = request.Adjustments ?? new Dictionary<string, JsonElement>();
+        var response = BuildExternalResponse(
+            reviewTask.Session.WorkflowType,
+            correlation.SessionId,
+            taskId,
+            correlation.RequestId,
+            normalizedAction,
+            request.Comment,
+            adjustments);
 
-        // 更新 review_tasks 状态
+        await ResumeWorkflowAsync(
+            reviewTask.Session.WorkflowType,
+            correlation.SessionId,
+            response,
+            cancellationToken);
+
         await reviewTaskGateway.UpdateStatusAsync(
             taskId,
             MapReviewTaskStatus(normalizedAction),
@@ -343,44 +357,62 @@ internal sealed class ReviewApplicationService(
             reviewedAt,
             cancellationToken);
 
-        // 根据 workflow type 构建对应的 response message 并恢复
-        if (reviewTask.Session.WorkflowType == "sql_analysis")
-        {
-            var sqlResponse = reviewResponseFactory.CreateSqlResponse(
-                correlation.SessionId,
-                taskId,
-                correlation.RequestId,
-                correlation.EngineRunId,
-                correlation.CheckpointRef,
-                normalizedAction,
-                request.Comment,
-                adjustments);
+        return new ReviewSubmitResponse(taskId, MapReviewTaskStatus(normalizedAction), reviewedAt);
+    }
 
-            await mafWorkflowRuntime.ResumeSqlWorkflowAsync(sqlResponse, cancellationToken);
-        }
-        else if (reviewTask.Session.WorkflowType == "db_config_optimization")
+    private ExternalResponse BuildExternalResponse(
+        string workflowType,
+        Guid sessionId,
+        Guid taskId,
+        string requestId,
+        string action,
+        string? comment,
+        IReadOnlyDictionary<string, JsonElement> adjustments)
+    {
+        return workflowType switch
         {
-            var configResponse = reviewResponseFactory.CreateDbConfigResponse(
-                correlation.SessionId,
+            "sql_analysis" => reviewResponseFactory.CreateSqlResponse(
+                sessionId,
                 taskId,
-                correlation.RequestId,
-                correlation.EngineRunId,
-                correlation.CheckpointRef,
-                normalizedAction,
-                request.Comment,
-                adjustments);
-
-            await mafWorkflowRuntime.ResumeConfigWorkflowAsync(configResponse, cancellationToken);
-        }
-        else
-        {
-            throw new ApiException(
+                requestId,
+                action,
+                comment,
+                adjustments),
+            "db_config_optimization" => reviewResponseFactory.CreateDbConfigResponse(
+                sessionId,
+                taskId,
+                requestId,
+                action,
+                comment,
+                adjustments),
+            _ => throw new ApiException(
                 StatusCodes.Status400BadRequest,
                 "UNKNOWN_WORKFLOW_TYPE",
-                $"Unknown workflow type: {reviewTask.Session.WorkflowType}",
-                new { workflowType = reviewTask.Session.WorkflowType });
-        }
+                $"Unknown workflow type: {workflowType}",
+                new { workflowType })
+        };
+    }
 
-        return new ReviewSubmitResponse(taskId, MapReviewTaskStatus(normalizedAction), reviewedAt);
+    private async Task ResumeWorkflowAsync(
+        string workflowType,
+        Guid sessionId,
+        ExternalResponse response,
+        CancellationToken cancellationToken)
+    {
+        switch (workflowType)
+        {
+            case "sql_analysis":
+                await mafWorkflowRuntime.ResumeSqlWorkflowAsync(sessionId, response, cancellationToken);
+                return;
+            case "db_config_optimization":
+                await mafWorkflowRuntime.ResumeConfigWorkflowAsync(sessionId, response, cancellationToken);
+                return;
+            default:
+                throw new ApiException(
+                    StatusCodes.Status400BadRequest,
+                    "UNKNOWN_WORKFLOW_TYPE",
+                    $"Unknown workflow type: {workflowType}",
+                    new { workflowType });
+        }
     }
 }

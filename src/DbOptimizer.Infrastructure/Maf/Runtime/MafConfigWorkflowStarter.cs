@@ -3,8 +3,6 @@ using DbOptimizer.Infrastructure.Maf.Runtime.ErrorHandling;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
 using Microsoft.Agents.AI.Workflows;
-using Microsoft.Agents.AI.Workflows.Checkpointing;
-using Microsoft.Agents.AI.Workflows.InProc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -15,11 +13,11 @@ internal sealed class MafConfigWorkflowStarter
     private readonly IMafWorkflowFactory _workflowFactory;
     private readonly IMafRunStateStore _runStateStore;
     private readonly IDbContextFactory<DbOptimizerDbContext> _dbContextFactory;
+    private readonly CheckpointManager _checkpointManager;
     private readonly ILogger<MafConfigWorkflowStarter> _logger;
     private readonly IWorkflowEventPublisher _eventPublisher;
     private readonly MafGlobalErrorHandler _errorHandler;
     private readonly RetryPolicy _retryPolicy;
-    private readonly CheckpointManager _checkpointManager;
 
     public MafConfigWorkflowStarter(
         IMafWorkflowFactory workflowFactory,
@@ -81,16 +79,14 @@ internal sealed class MafConfigWorkflowStarter
                     new
                     {
                         runId,
-                        command.DatabaseId,
-                        command.DatabaseType,
-                        command.RequireHumanReview
+                        message = "DB config optimization workflow started."
                     }),
                 cancellationToken);
 
             await _runStateStore.SaveAsync(
                 command.SessionId,
                 runId,
-                checkpointRef: string.Empty,
+                checkpointRef: "{}",
                 engineState: "{}",
                 cancellationToken);
 
@@ -111,7 +107,7 @@ internal sealed class MafConfigWorkflowStarter
             await _errorHandler.HandleWorkflowErrorAsync(
                 command.SessionId,
                 ex,
-                currentStep: "workflow_start",
+                currentStep: "workflow_prepare",
                 cancellationToken);
 
             throw;
@@ -146,7 +142,7 @@ internal sealed class MafConfigWorkflowStarter
     {
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        var session = new WorkflowSessionEntity
+        var entity = new WorkflowSessionEntity
         {
             SessionId = sessionId,
             WorkflowType = workflowType,
@@ -159,15 +155,9 @@ internal sealed class MafConfigWorkflowStarter
             UpdatedAt = DateTimeOffset.UtcNow
         };
 
-        dbContext.WorkflowSessions.Add(session);
+        dbContext.WorkflowSessions.Add(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation(
-            "Created workflow session. SessionId={SessionId}, WorkflowType={WorkflowType}",
-            sessionId,
-            workflowType);
-
-        return session;
+        return entity;
     }
 
     private async Task ExecuteConfigWorkflowAsync(
@@ -179,12 +169,7 @@ internal sealed class MafConfigWorkflowStarter
     {
         try
         {
-            _logger.LogInformation(
-                "Executing Config workflow. SessionId={SessionId}, RunId={RunId}",
-                sessionId,
-                runId);
-
-            var run = await InProcessExecution.RunAsync(
+            await using var run = await InProcessExecution.RunAsync(
                 workflow,
                 command,
                 _checkpointManager,
@@ -192,16 +177,23 @@ internal sealed class MafConfigWorkflowStarter
                 cancellationToken);
 
             var status = await run.GetStatusAsync(cancellationToken);
-            await UpdateSessionFromStatusAsync(sessionId, runId, status, cancellationToken);
-        }
-        catch (DbConfig.Executors.WorkflowSuspendedException ex)
-        {
-            _logger.LogInformation(
-                ex,
-                "Config workflow suspended. SessionId={SessionId}",
-                sessionId);
+            var pendingRequest = run.OutgoingEvents
+                .OfType<RequestInfoEvent>()
+                .LastOrDefault();
 
-            await UpdateSessionToSuspendedAsync(sessionId, runId, ex.Message, cancellationToken);
+            if (status == RunStatus.PendingRequests &&
+                pendingRequest?.Request.TryGetDataAs<ConfigReviewRequestMessage>(out var request) == true)
+            {
+                var checkpointRef = run.Checkpoints.LastOrDefault()?.CheckpointId ?? string.Empty;
+                await UpdateReviewCorrelationAsync(
+                    request.TaskId,
+                    pendingRequest.Request.RequestId,
+                    runId,
+                    checkpointRef,
+                    cancellationToken);
+            }
+
+            await UpdateSessionFromStatusAsync(sessionId, runId, status, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -213,6 +205,26 @@ internal sealed class MafConfigWorkflowStarter
             await UpdateSessionToFailedAsync(sessionId, runId, ex, cancellationToken);
             throw;
         }
+    }
+
+    private async Task UpdateReviewCorrelationAsync(
+        Guid taskId,
+        string requestId,
+        string runId,
+        string checkpointRef,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var reviewTask = await dbContext.ReviewTasks.FindAsync([taskId], cancellationToken);
+        if (reviewTask is null)
+        {
+            return;
+        }
+
+        reviewTask.RequestId = requestId;
+        reviewTask.EngineRunId = runId;
+        reviewTask.EngineCheckpointRef = checkpointRef;
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private async Task UpdateSessionFromStatusAsync(
@@ -259,32 +271,6 @@ internal sealed class MafConfigWorkflowStarter
 
         session.UpdatedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
-    }
-
-    private async Task UpdateSessionToSuspendedAsync(
-        Guid sessionId,
-        string runId,
-        string message,
-        CancellationToken cancellationToken)
-    {
-        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cancellationToken);
-
-        if (session is not null)
-        {
-            session.Status = "suspended";
-            session.UpdatedAt = DateTimeOffset.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-
-        await _eventPublisher.PublishAsync(
-            new WorkflowEventMessage(
-                WorkflowEventType.WorkflowWaitingReview,
-                sessionId,
-                "db_config_optimization",
-                DateTimeOffset.UtcNow,
-                new { runId, message }),
-            cancellationToken);
     }
 
     private async Task UpdateSessionToFailedAsync(

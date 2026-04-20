@@ -546,3 +546,51 @@ internal sealed class ObservedExecutor<TInput, TOutput>(
         return string.Equals(exception.GetType().Name, "WorkflowSuspendedException", StringComparison.Ordinal);
     }
 }
+
+internal sealed class ObservedExecutor<TInput>(
+    string workflowType,
+    Executor<TInput> innerExecutor,
+    IMafExecutorInstrumentation instrumentation)
+    : Executor<TInput>(innerExecutor.Id)
+{
+    public override async ValueTask HandleAsync(
+        TInput message,
+        IWorkflowContext context,
+        CancellationToken cancellationToken = default)
+    {
+        var startedAt = DateTimeOffset.UtcNow;
+        var executionId = await instrumentation.OnStartedAsync(
+            workflowType,
+            innerExecutor.Id,
+            message!,
+            startedAt,
+            cancellationToken);
+
+        try
+        {
+            await innerExecutor.HandleAsync(message, context, cancellationToken);
+            await instrumentation.OnCompletedAsync(
+                workflowType,
+                innerExecutor.Id,
+                message!,
+                new { completed = true },
+                startedAt,
+                DateTimeOffset.UtcNow,
+                executionId: executionId,
+                cancellationToken: cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            await instrumentation.OnFailedAsync(
+                workflowType,
+                innerExecutor.Id,
+                message!,
+                ex,
+                startedAt,
+                DateTimeOffset.UtcNow,
+                executionId,
+                cancellationToken);
+            throw;
+        }
+    }
+}

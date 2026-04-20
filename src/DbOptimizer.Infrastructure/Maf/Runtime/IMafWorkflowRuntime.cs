@@ -1,5 +1,7 @@
 namespace DbOptimizer.Infrastructure.Maf.Runtime;
 
+using Microsoft.Agents.AI.Workflows;
+
 /// <summary>
 /// MAF Workflow 运行时接口，负责启动、恢复、取消 workflow
 /// </summary>
@@ -30,14 +32,16 @@ public interface IMafWorkflowRuntime
     /// 恢复已暂停的 SQL workflow，传递审核决策消息
     /// </summary>
     Task<WorkflowResumeResponse> ResumeSqlWorkflowAsync(
-        SqlAnalysis.ReviewDecisionResponseMessage reviewResponse,
+        Guid sessionId,
+        ExternalResponse reviewResponse,
         CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 恢复已暂停的 Config workflow，传递审核决策消息
     /// </summary>
     Task<WorkflowResumeResponse> ResumeConfigWorkflowAsync(
-        DbConfig.ConfigReviewDecisionResponseMessage reviewResponse,
+        Guid sessionId,
+        ExternalResponse reviewResponse,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -55,7 +59,8 @@ public sealed record SqlAnalysisWorkflowCommand(
     Guid SessionId,
     string SqlText,
     string DatabaseType,
-    string? SchemaName = null);
+    string? SchemaName = null,
+    bool RequireHumanReview = false);
 
 /// <summary>
 /// 数据库配置优化 workflow 命令
