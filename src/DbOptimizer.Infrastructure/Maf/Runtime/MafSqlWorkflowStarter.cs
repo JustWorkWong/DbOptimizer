@@ -1,18 +1,15 @@
-using Microsoft.Extensions.Logging;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Agents.AI.Workflows;
-using Microsoft.Agents.AI.Workflows.InProc;
-using Microsoft.Agents.AI.Workflows.Checkpointing;
-using DbOptimizer.Infrastructure.Persistence;
-using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
 using DbOptimizer.Infrastructure.Maf.Runtime.ErrorHandling;
+using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
+using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
+using Microsoft.Agents.AI.Workflows;
+using Microsoft.Agents.AI.Workflows.Checkpointing;
+using Microsoft.Agents.AI.Workflows.InProc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace DbOptimizer.Infrastructure.Maf.Runtime;
 
-/// <summary>
-/// SQL Workflow 启动器
-/// </summary>
 internal sealed class MafSqlWorkflowStarter
 {
     private readonly IMafWorkflowFactory _workflowFactory;
@@ -44,28 +41,26 @@ internal sealed class MafSqlWorkflowStarter
         _retryPolicy = retryPolicy;
     }
 
-    public async Task<WorkflowStartResponse> StartAsync(
+    public async Task<PreparedSqlWorkflowStart> PrepareStartAsync(
         SqlAnalysisWorkflowCommand command,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(command);
 
         _logger.LogInformation(
-            "Starting SQL analysis workflow. SessionId={SessionId}, DatabaseType={DatabaseType}",
+            "Preparing SQL analysis workflow. SessionId={SessionId}, DatabaseType={DatabaseType}",
             command.SessionId,
             command.DatabaseType);
 
         try
         {
-            // 1. 创建 workflow session
-            var session = await CreateWorkflowSessionAsync(
+            await CreateWorkflowSessionAsync(
                 command.SessionId,
                 "sql_analysis",
                 "manual",
                 null,
                 cancellationToken);
 
-            // 2. 转换为 MAF 内部使用的完整 command
             var mafCommand = new SqlAnalysis.SqlAnalysisWorkflowCommand(
                 SessionId: command.SessionId,
                 SqlText: command.SqlText,
@@ -77,10 +72,7 @@ internal sealed class MafSqlWorkflowStarter
                 EnableSqlRewrite: true,
                 RequireHumanReview: false);
 
-            // 3. 构建 workflow graph
             var workflow = _workflowFactory.BuildSqlAnalysisWorkflow();
-
-            // 4. 生成 runId
             var runId = $"maf_run_{Guid.NewGuid():N}";
 
             await _eventPublisher.PublishAsync(
@@ -98,7 +90,6 @@ internal sealed class MafSqlWorkflowStarter
                     }),
                 cancellationToken);
 
-            // 5. 保存 MAF run state（初始状态）
             await _runStateStore.SaveAsync(
                 command.SessionId,
                 runId,
@@ -106,62 +97,18 @@ internal sealed class MafSqlWorkflowStarter
                 engineState: "{}",
                 cancellationToken);
 
-            // 6. 异步执行 workflow（fire-and-forget）
-#pragma warning disable CS4014
-            Task.Run(async () =>
-            {
-                try
-                {
-                    _logger.LogInformation("Workflow execution started in background. SessionId={SessionId}, RunId={RunId}",
-                        command.SessionId, runId);
-
-                    await _retryPolicy.ExecuteAsync(
-                        async ct =>
-                        {
-                            await ExecuteSqlWorkflowAsync(workflow, mafCommand, command.SessionId, runId, ct);
-                            return true;
-                        },
-                        $"SqlAnalysisWorkflow-{command.SessionId}",
-                        CancellationToken.None);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Workflow execution failed. SessionId={SessionId}, RunId={RunId}",
-                        command.SessionId, runId);
-
-                    await _errorHandler.HandleWorkflowErrorAsync(
-                        command.SessionId,
-                        ex,
-                        currentStep: "workflow_execution",
-                        CancellationToken.None);
-                }
-            }, CancellationToken.None)
-            .ContinueWith(task =>
-            {
-                if (task.IsFaulted)
-                {
-                    _logger.LogCritical(task.Exception,
-                        "Unhandled exception in background SQL workflow task. SessionId={SessionId}, RunId={RunId}",
-                        command.SessionId, runId);
-                }
-            }, TaskScheduler.Default);
-#pragma warning restore CS4014
-
-            _logger.LogInformation(
-                "SQL analysis workflow started successfully. SessionId={SessionId}, RunId={RunId}",
+            return new PreparedSqlWorkflowStart(
                 command.SessionId,
-                runId);
-
-            return new WorkflowStartResponse(
-                SessionId: command.SessionId,
-                RunId: runId,
-                Status: "running");
+                runId,
+                workflow,
+                mafCommand,
+                new WorkflowStartResponse(command.SessionId, runId, "running"));
         }
         catch (Exception ex)
         {
             _logger.LogError(
                 ex,
-                "Failed to start SQL analysis workflow. SessionId={SessionId}",
+                "Failed to prepare SQL analysis workflow. SessionId={SessionId}",
                 command.SessionId);
 
             await _errorHandler.HandleWorkflowErrorAsync(
@@ -172,6 +119,25 @@ internal sealed class MafSqlWorkflowStarter
 
             throw;
         }
+    }
+
+    public async Task ExecutePreparedStartAsync(
+        PreparedSqlWorkflowStart start,
+        CancellationToken cancellationToken = default)
+    {
+        await _retryPolicy.ExecuteAsync(
+            async ct =>
+            {
+                await ExecuteSqlWorkflowAsync(
+                    start.Workflow,
+                    start.Command,
+                    start.SessionId,
+                    start.RunId,
+                    ct);
+                return true;
+            },
+            $"SqlAnalysisWorkflow-{start.SessionId}",
+            cancellationToken);
     }
 
     private async Task<WorkflowSessionEntity> CreateWorkflowSessionAsync(
@@ -207,9 +173,6 @@ internal sealed class MafSqlWorkflowStarter
         return session;
     }
 
-    /// <summary>
-    /// 执行 SQL 分析 workflow
-    /// </summary>
     private async Task ExecuteSqlWorkflowAsync(
         Workflow workflow,
         SqlAnalysis.SqlAnalysisWorkflowCommand command,
@@ -224,7 +187,6 @@ internal sealed class MafSqlWorkflowStarter
                 sessionId,
                 runId);
 
-            // 使用 MAF InProcessExecution 执行 workflow
             var run = await InProcessExecution.RunAsync(
                 workflow,
                 command,
@@ -232,76 +194,17 @@ internal sealed class MafSqlWorkflowStarter
                 sessionId.ToString(),
                 cancellationToken);
 
-            // 获取 workflow 状态
             var status = await run.GetStatusAsync(cancellationToken);
-
-            // 更新 session 状态
-            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cancellationToken);
-
-            if (session != null)
-            {
-                if (status == RunStatus.Ended)
-                {
-                    session.Status = "completed";
-                    session.CompletedAt = DateTimeOffset.UtcNow;
-                    _logger.LogInformation(
-                        "SQL workflow completed successfully. SessionId={SessionId}",
-                        sessionId);
-                    await _eventPublisher.PublishAsync(
-                        new WorkflowEventMessage(
-                            WorkflowEventType.WorkflowCompleted,
-                            sessionId,
-                            "sql_analysis",
-                            DateTimeOffset.UtcNow,
-                            new { runId, message = "SQL workflow completed." }),
-                        cancellationToken);
-                }
-                else if (status == RunStatus.PendingRequests || status == RunStatus.Idle)
-                {
-                    session.Status = "suspended";
-                    _logger.LogInformation(
-                        "SQL workflow suspended for review. SessionId={SessionId}",
-                        sessionId);
-                    await _eventPublisher.PublishAsync(
-                        new WorkflowEventMessage(
-                            WorkflowEventType.WorkflowWaitingReview,
-                            sessionId,
-                            "sql_analysis",
-                            DateTimeOffset.UtcNow,
-                            new { runId, message = "SQL workflow is waiting for review." }),
-                        cancellationToken);
-                }
-
-                session.UpdatedAt = DateTimeOffset.UtcNow;
-                await dbContext.SaveChangesAsync(cancellationToken);
-            }
+            await UpdateSessionFromStatusAsync(sessionId, runId, status, cancellationToken);
         }
         catch (SqlAnalysis.Executors.WorkflowSuspendedException ex)
         {
-            // Workflow 挂起等待审核
             _logger.LogInformation(
                 ex,
                 "SQL workflow suspended. SessionId={SessionId}",
                 sessionId);
 
-            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cancellationToken);
-            if (session != null)
-            {
-                session.Status = "suspended";
-                session.UpdatedAt = DateTimeOffset.UtcNow;
-                await dbContext.SaveChangesAsync(cancellationToken);
-            }
-
-            await _eventPublisher.PublishAsync(
-                new WorkflowEventMessage(
-                    WorkflowEventType.WorkflowWaitingReview,
-                    sessionId,
-                    "sql_analysis",
-                    DateTimeOffset.UtcNow,
-                    new { runId, message = ex.Message }),
-                cancellationToken);
+            await UpdateSessionToSuspendedAsync(sessionId, runId, ex.Message, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -310,33 +213,114 @@ internal sealed class MafSqlWorkflowStarter
                 "SQL workflow execution failed. SessionId={SessionId}",
                 sessionId);
 
-            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cancellationToken);
-            if (session != null)
-            {
-                session.Status = "failed";
-                session.ErrorMessage = ex.Message;
-                session.CompletedAt = DateTimeOffset.UtcNow;
-                session.UpdatedAt = DateTimeOffset.UtcNow;
-                await dbContext.SaveChangesAsync(cancellationToken);
-            }
+            await UpdateSessionToFailedAsync(sessionId, runId, ex, cancellationToken);
+            throw;
+        }
+    }
+
+    private async Task UpdateSessionFromStatusAsync(
+        Guid sessionId,
+        string runId,
+        RunStatus status,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cancellationToken);
+
+        if (session is null)
+        {
+            return;
+        }
+
+        if (status == RunStatus.Ended)
+        {
+            session.Status = "completed";
+            session.CompletedAt = DateTimeOffset.UtcNow;
 
             await _eventPublisher.PublishAsync(
                 new WorkflowEventMessage(
-                    WorkflowEventType.WorkflowFailed,
+                    WorkflowEventType.WorkflowCompleted,
                     sessionId,
                     "sql_analysis",
                     DateTimeOffset.UtcNow,
-                    new
-                    {
-                        runId,
-                        errorMessage = ex.Message,
-                        exceptionType = ex.GetType().Name
-                    }),
+                    new { runId, message = "SQL workflow completed." }),
                 cancellationToken);
-
-            throw;
         }
+        else if (status == RunStatus.PendingRequests || status == RunStatus.Idle)
+        {
+            session.Status = "suspended";
+
+            await _eventPublisher.PublishAsync(
+                new WorkflowEventMessage(
+                    WorkflowEventType.WorkflowWaitingReview,
+                    sessionId,
+                    "sql_analysis",
+                    DateTimeOffset.UtcNow,
+                    new { runId, message = "SQL workflow is waiting for review." }),
+                cancellationToken);
+        }
+
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task UpdateSessionToSuspendedAsync(
+        Guid sessionId,
+        string runId,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cancellationToken);
+
+        if (session is not null)
+        {
+            session.Status = "suspended";
+            session.UpdatedAt = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        await _eventPublisher.PublishAsync(
+            new WorkflowEventMessage(
+                WorkflowEventType.WorkflowWaitingReview,
+                sessionId,
+                "sql_analysis",
+                DateTimeOffset.UtcNow,
+                new { runId, message }),
+            cancellationToken);
+    }
+
+    private async Task UpdateSessionToFailedAsync(
+        Guid sessionId,
+        string runId,
+        Exception ex,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cancellationToken);
+
+        if (session is not null)
+        {
+            session.Status = "failed";
+            session.ErrorMessage = ex.Message;
+            session.CompletedAt = DateTimeOffset.UtcNow;
+            session.UpdatedAt = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        await _eventPublisher.PublishAsync(
+            new WorkflowEventMessage(
+                WorkflowEventType.WorkflowFailed,
+                sessionId,
+                "sql_analysis",
+                DateTimeOffset.UtcNow,
+                new
+                {
+                    runId,
+                    errorMessage = ex.Message,
+                    exceptionType = ex.GetType().Name
+                }),
+            cancellationToken);
     }
 
     private static string BuildSqlPreview(string sqlText)
@@ -346,3 +330,10 @@ internal sealed class MafSqlWorkflowStarter
         return singleLine.Length <= maxLength ? singleLine : $"{singleLine[..maxLength]}...";
     }
 }
+
+internal sealed record PreparedSqlWorkflowStart(
+    Guid SessionId,
+    string RunId,
+    Workflow Workflow,
+    SqlAnalysis.SqlAnalysisWorkflowCommand Command,
+    WorkflowStartResponse Response);
