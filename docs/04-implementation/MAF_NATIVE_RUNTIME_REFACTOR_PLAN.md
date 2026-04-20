@@ -20,7 +20,8 @@
 - 2026-04-21: `PR-F` cleanup landed on the implementation branch.
   - Removed legacy runtime compatibility branches no longer needed by the main path.
   - Aligned implementation docs/checklists with actual shipped behavior.
-  - Remaining follow-ups are governance items such as feature-flag defaults, concurrency policy, and legacy-session tooling.
+  - Follow-up governance for the initial launch path has landed: native runtime flags are explicit, validated at startup, and concurrency rejection is enforced.
+  - Legacy-session tooling remains intentionally out of scope because the project has not started using the old runtime in production.
 
 ## 1. 文档目的
 

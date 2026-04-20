@@ -48,6 +48,9 @@ var workflowRuntimeOptions = builder.Configuration.GetSection(WorkflowRuntimeOpt
     ?? new WorkflowRuntimeOptions();
 var mafWorkflowRuntimeOptions = builder.Configuration.GetSection("MafWorkflowRuntime").Get<MafWorkflowRuntimeOptions>()
     ?? new MafWorkflowRuntimeOptions();
+var workflowExecutionOptions = builder.Configuration.GetSection(DbOptimizer.Infrastructure.Workflows.WorkflowExecutionOptions.SectionName).Get<DbOptimizer.Infrastructure.Workflows.WorkflowExecutionOptions>()
+    ?? new DbOptimizer.Infrastructure.Workflows.WorkflowExecutionOptions();
+workflowExecutionOptions.ValidateForCurrentImplementation();
 var configCollectionOptions = builder.Configuration.GetSection(ConfigCollectionOptions.SectionName).Get<ConfigCollectionOptions>()
     ?? new ConfigCollectionOptions();
 NormalizeConfigCollectionOptions(configCollectionOptions, currentAssemblyPath);
@@ -188,11 +191,13 @@ builder.Services.AddSingleton<DbOptimizer.Core.Models.ISqlParser, DbOptimizer.Co
 builder.Services.AddSingleton(workflowExecutionPlanOptions);
 builder.Services.AddSingleton(slowQueryExecutionPlanOptions);
 builder.Services.AddSingleton(workflowRuntimeOptions);
+builder.Services.AddSingleton(workflowExecutionOptions);
 builder.Services.AddSingleton(configCollectionOptions);
 builder.Services.AddSingleton(slowQueryCollectionOptions);
 
 // MAF Workflow Runtime 服务注册
 builder.Services.AddSingleton(mafWorkflowRuntimeOptions);
+builder.Services.AddSingleton<IWorkflowExecutionConcurrencyGate, WorkflowExecutionConcurrencyGate>();
 builder.Services.AddSingleton<IMafWorkflowFactory, MafWorkflowFactory>();
 builder.Services.AddSingleton<IMafExecutorInstrumentation, MafExecutorInstrumentation>();
 builder.Services.AddSingleton<ICheckpointStore<JsonElement>, MafJsonCheckpointStore>();

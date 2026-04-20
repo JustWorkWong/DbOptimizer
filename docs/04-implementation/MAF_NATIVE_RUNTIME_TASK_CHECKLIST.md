@@ -8,7 +8,10 @@
 - [x] PR-D completed
 - [x] PR-E completed
 - [x] PR-F completed
-- [ ] Follow-up governance items (feature-flag defaults, concurrency policy, legacy session tooling) remain for later dedicated tasks
+- [x] Governance follow-ups completed for the initial launch path
+- [x] `WorkflowExecution` native-runtime flags are now explicit and validated at startup
+- [x] Instance-level and workflow-type concurrency rejection is now enforced in runtime start/resume paths
+- [x] Legacy-session migration work is intentionally skipped because the project has not started using the old runtime in production
 
 > 基于 [MAF_NATIVE_RUNTIME_REFACTOR_PLAN.md](./MAF_NATIVE_RUNTIME_REFACTOR_PLAN.md) 与当前代码现状整理  
 > 更新时间：2026-04-20  
