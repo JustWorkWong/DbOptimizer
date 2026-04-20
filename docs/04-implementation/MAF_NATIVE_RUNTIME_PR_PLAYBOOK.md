@@ -191,35 +191,35 @@
 
 ### 开发步骤
 
-1. [ ] 明确 MAF run event 到业务事件的映射
-2. [ ] 优先从 run stream 消费事件
-3. [ ] 改造 projection writer，使其只消费统一事件源
-4. [ ] 增加 `runId/requestId/checkpointId/superstep` 日志字段
-5. [ ] 删掉 starter/runtime 中重复的手工事件发布
-6. [ ] 验证 SSE/history/timeline 不回归
+1. [x] 明确 MAF run event 到业务事件的映射
+2. [x] 优先从 run stream 消费事件
+3. [x] 改造 projection writer，使其只消费统一事件源
+4. [x] 增加 `runId/requestId/checkpointId/superstep` 日志字段
+5. [x] 删掉 starter/runtime 中重复的手工事件发布
+6. [x] 验证 SSE/history/timeline 不回归
 
 ### 重点文件
 
-- [ ] `src/DbOptimizer.Infrastructure/Workflows/Events/*`
-- [ ] `src/DbOptimizer.Infrastructure/Workflows/Projection/*`
-- [ ] `src/DbOptimizer.Infrastructure/Maf/Runtime/MafExecutorInstrumentation.cs`
-- [ ] `src/DbOptimizer.Infrastructure/Maf/Runtime/MafWorkflowRuntime.cs`
+- [x] `src/DbOptimizer.Infrastructure/Workflows/Events/*`
+- [x] `src/DbOptimizer.Infrastructure/Workflows/Projection/*`
+- [x] `src/DbOptimizer.Infrastructure/Maf/Runtime/MafExecutorInstrumentation.cs`
+- [x] `src/DbOptimizer.Infrastructure/Maf/Runtime/MafWorkflowRuntime.cs`
 
 ### 完成门槛
 
-- [ ] 前端事件协议不变
-- [ ] SSE/history/timeline 不重复不丢失
-- [ ] 日志可以定位 run/request/checkpoint/superstep
+- [x] 前端事件协议不变
+- [x] SSE/history/timeline 不重复不丢失
+- [x] 日志可以定位 run/request/checkpoint/superstep
 
 ### 建议提交信息
 
-- [ ] `refactor: project maf run events into workflow timeline and logs`
+- [x] `refactor: project maf run events into workflow timeline and logs`
 
 ### 建议测试
 
-- [ ] `dotnet test tests/DbOptimizer.BackendE2ETests/DbOptimizer.BackendE2ETests.csproj --filter Sse`
-- [ ] `dotnet test tests/DbOptimizer.Infrastructure.Tests/DbOptimizer.Infrastructure.Tests.csproj --filter Event`
-- [ ] `dotnet build src/DbOptimizer.API/DbOptimizer.API.csproj`
+- [x] `dotnet test tests/DbOptimizer.API.Tests/DbOptimizer.API.Tests.csproj --filter "WorkflowEventHubTests|HistoryQueryServiceTests|ReviewApplicationServiceTests"`
+- [x] `dotnet test tests/DbOptimizer.Infrastructure.Tests/DbOptimizer.Infrastructure.Tests.csproj --filter "WorkflowProjectionWriterTests|MafWorkflowRuntimeTests|MafNativeWorkflowInteropTests"`
+- [x] `dotnet build src/DbOptimizer.API/DbOptimizer.API.csproj`
 
 ## 7. PR-F
 

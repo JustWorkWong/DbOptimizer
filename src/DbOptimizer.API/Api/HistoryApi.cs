@@ -358,9 +358,12 @@ internal sealed class HistoryQueryService(
             .OrderBy(item => item.StartedAt)
             .ToListAsync(cancellationToken);
 
+        var timelineEvents = MergeTimelineEvents(
+            WorkflowTimeline.GetEvents(checkpoint),
+            workflowEventQueryService.GetEvents(sessionId, 0, 2048));
         var executorResponses = executions.Count > 0
             ? executions.Select(BuildExecutorResponse).ToArray()
-            : BuildExecutorsFromEvents(MergeEvents(checkpoint, workflowEventQueryService.GetEvents(sessionId, 0, 2048)));
+            : BuildExecutorsFromEvents(timelineEvents);
 
         var tokenUsage = AggregateTokenUsage(executorResponses);
 
@@ -397,7 +400,9 @@ internal sealed class HistoryQueryService(
         }
 
         var checkpoint = WorkflowCheckpointJson.Deserialize(state);
-        var events = MergeEvents(checkpoint, workflowEventQueryService.GetEvents(sessionId, 0, 2048))
+        var events = MergeTimelineEvents(
+                WorkflowTimeline.GetEvents(checkpoint),
+                workflowEventQueryService.GetEvents(sessionId, 0, 2048))
             .Select(item => new HistoryReplayEventResponse(
                 item.Sequence,
                 item.Timestamp,
@@ -567,19 +572,6 @@ internal sealed class HistoryQueryService(
         return resultElement;
     }
 
-    private static IReadOnlyList<WorkflowEventRecord> MergeEvents(
-        WorkflowCheckpoint? checkpoint,
-        IReadOnlyList<WorkflowEventRecord> liveEvents)
-    {
-        var persistedEvents = WorkflowTimeline.GetEvents(checkpoint);
-        return persistedEvents
-            .Concat(liveEvents)
-            .GroupBy(item => item.Sequence)
-            .Select(group => group.OrderByDescending(item => item.Timestamp).First())
-            .OrderBy(item => item.Sequence)
-            .ToArray();
-    }
-
     private static MutableExecutorTimeline? FindOpenExecution(
         IReadOnlyList<MutableExecutorTimeline> executions,
         string executorName)
@@ -688,6 +680,18 @@ internal sealed class HistoryQueryService(
             JsonValueKind.String => decimal.TryParse(property.GetString(), out value),
             _ => false
         };
+    }
+
+    private static IReadOnlyList<WorkflowEventRecord> MergeTimelineEvents(
+        IReadOnlyList<WorkflowEventRecord> persistedEvents,
+        IReadOnlyList<WorkflowEventRecord> liveEvents)
+    {
+        return persistedEvents
+            .Concat(liveEvents)
+            .GroupBy(item => item.Sequence)
+            .Select(group => group.OrderByDescending(item => item.Timestamp).First())
+            .OrderBy(item => item.Sequence)
+            .ToArray();
     }
 
     private sealed class MutableExecutorTimeline(string executorName)

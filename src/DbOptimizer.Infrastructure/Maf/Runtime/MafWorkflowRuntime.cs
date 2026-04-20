@@ -11,8 +11,6 @@ namespace DbOptimizer.Infrastructure.Maf.Runtime;
 
 public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
 {
-    private static readonly string[] WaitingStatuses = ["suspended", "WaitingReview", "WaitingForReview"];
-
     private readonly IMafWorkflowFactory _workflowFactory;
     private readonly IMafRunStateStore _runStateStore;
     private readonly IDbContextFactory<DbOptimizerDbContext> _dbContextFactory;
@@ -133,7 +131,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
     {
         var (session, runState, workflow) = await LoadResumeContextAsync(sessionId, cancellationToken);
 
-        session.Status = "running";
+        session.Status = WorkflowSessionStatus.Running;
         session.UpdatedAt = DateTimeOffset.UtcNow;
 
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -211,10 +209,24 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                     throw new InvalidOperationException($"Unknown workflow type: {session.WorkflowType}");
             }
 
-            session.Status = "cancelled";
+            session.Status = WorkflowSessionStatus.Cancelled;
             session.UpdatedAt = DateTimeOffset.UtcNow;
             session.CompletedAt = DateTimeOffset.UtcNow;
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            await _eventPublisher.PublishAsync(
+                new WorkflowEventMessage(
+                    WorkflowEventType.WorkflowCancelled,
+                    sessionId,
+                    session.WorkflowType,
+                    DateTimeOffset.UtcNow,
+                    new
+                    {
+                        runId = runState.RunId,
+                        checkpointId = runState.CheckpointRef,
+                        message = "Workflow cancelled."
+                    }),
+                cancellationToken);
 
             await _runStateStore.DeleteAsync(sessionId, cancellationToken);
 
@@ -252,7 +264,14 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
         ArgumentNullException.ThrowIfNull(reviewResponse);
 
         var (session, runState, workflow) = await LoadResumeContextAsync(sessionId, cancellationToken);
-        await UpdateSessionStatusAsync(sessionId, "running", cancellationToken);
+        _logger.LogInformation(
+            "Resuming workflow with review response. SessionId={SessionId}, WorkflowType={WorkflowType}, RunId={RunId}, CheckpointId={CheckpointId}",
+            sessionId,
+            session.WorkflowType,
+            runState.RunId,
+            runState.CheckpointRef);
+
+        await UpdateSessionStatusAsync(sessionId, WorkflowSessionStatus.Running, cancellationToken);
 
         await using var run = await InProcessExecution.ResumeAsync(
             workflow,
@@ -286,7 +305,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             throw new InvalidOperationException($"Session {sessionId} not found");
         }
 
-        if (!WaitingStatuses.Any(status => string.Equals(status, session.Status, StringComparison.OrdinalIgnoreCase)))
+        if (!WorkflowSessionStatus.IsWaitingForReview(session.Status))
         {
             throw new InvalidOperationException(
                 $"Session {sessionId} is not waiting for review (current status: {session.Status})");
@@ -341,8 +360,8 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
 
         switch (status)
         {
-            case RunStatus.Ended:
-                session.Status = "completed";
+                case RunStatus.Ended:
+                session.Status = WorkflowSessionStatus.Completed;
                 session.CompletedAt = DateTimeOffset.UtcNow;
                 session.ErrorMessage = null;
                 await _eventPublisher.PublishAsync(
@@ -351,25 +370,35 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                         sessionId,
                         session.WorkflowType,
                         DateTimeOffset.UtcNow,
-                        new { runId, message = "Workflow completed." }),
+                        new
+                        {
+                            runId,
+                            checkpointId = await TryGetCheckpointRefAsync(sessionId, cancellationToken),
+                            message = "Workflow completed."
+                        }),
                     cancellationToken);
                 break;
 
             case RunStatus.PendingRequests:
             case RunStatus.Idle:
-                session.Status = "suspended";
+                session.Status = WorkflowSessionStatus.WaitingForReview;
                 await _eventPublisher.PublishAsync(
                     new WorkflowEventMessage(
                         WorkflowEventType.WorkflowWaitingReview,
                         sessionId,
                         session.WorkflowType,
                         DateTimeOffset.UtcNow,
-                        new { runId, message = "Workflow is waiting for review." }),
+                        new
+                        {
+                            runId,
+                            checkpointId = await TryGetCheckpointRefAsync(sessionId, cancellationToken),
+                            message = "Workflow is waiting for review."
+                        }),
                     cancellationToken);
                 break;
 
             default:
-                session.Status = "failed";
+                session.Status = WorkflowSessionStatus.Failed;
                 session.ErrorMessage = exception?.Message ?? "Workflow resume failed.";
                 session.CompletedAt = DateTimeOffset.UtcNow;
                 await _eventPublisher.PublishAsync(
@@ -381,6 +410,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                         new
                         {
                             runId,
+                            checkpointId = await TryGetCheckpointRefAsync(sessionId, cancellationToken),
                             errorMessage = exception?.Message ?? "Workflow resume failed.",
                             exceptionType = exception?.GetType().Name
                         }),
@@ -405,7 +435,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             return;
         }
 
-        session.Status = "failed";
+        session.Status = WorkflowSessionStatus.Failed;
         session.ErrorMessage = exception.Message;
         session.CompletedAt = DateTimeOffset.UtcNow;
         session.UpdatedAt = DateTimeOffset.UtcNow;
@@ -420,6 +450,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                 new
                 {
                     runId,
+                    checkpointId = await TryGetCheckpointRefAsync(sessionId, cancellationToken),
                     errorMessage = exception.Message,
                     exceptionType = exception.GetType().Name
                 }),
@@ -431,9 +462,15 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
         return status switch
         {
             RunStatus.Ended => "completed",
-            RunStatus.PendingRequests or RunStatus.Idle => "suspended",
+            RunStatus.PendingRequests or RunStatus.Idle => WorkflowSessionStatus.WaitingForReview,
             _ => "failed"
         };
+    }
+
+    private async Task<string?> TryGetCheckpointRefAsync(Guid sessionId, CancellationToken cancellationToken)
+    {
+        var runState = await _runStateStore.GetAsync(sessionId, cancellationToken);
+        return runState?.CheckpointRef;
     }
 
     private void RunInBackground(

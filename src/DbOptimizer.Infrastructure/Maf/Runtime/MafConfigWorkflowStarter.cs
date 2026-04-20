@@ -146,7 +146,7 @@ internal sealed class MafConfigWorkflowStarter
         {
             SessionId = sessionId,
             WorkflowType = workflowType,
-            Status = "running",
+            Status = WorkflowSessionStatus.Running,
             State = "{}",
             EngineType = "maf",
             SourceType = sourceType,
@@ -180,20 +180,40 @@ internal sealed class MafConfigWorkflowStarter
             var pendingRequest = run.OutgoingEvents
                 .OfType<RequestInfoEvent>()
                 .LastOrDefault();
+            var checkpointRef = run.Checkpoints.LastOrDefault()?.CheckpointId;
+            var superstep = run.Checkpoints.Count;
+            var requestId = pendingRequest?.Request.RequestId;
+            Guid? taskId = null;
 
             if (status == RunStatus.PendingRequests &&
                 pendingRequest?.Request.TryGetDataAs<ConfigReviewRequestMessage>(out var request) == true)
             {
-                var checkpointRef = run.Checkpoints.LastOrDefault()?.CheckpointId ?? string.Empty;
+                taskId = request.TaskId;
                 await UpdateReviewCorrelationAsync(
                     request.TaskId,
                     pendingRequest.Request.RequestId,
                     runId,
-                    checkpointRef,
+                    checkpointRef ?? string.Empty,
+                    cancellationToken);
+
+                await _eventPublisher.PublishAsync(
+                    new WorkflowEventMessage(
+                        WorkflowEventType.CheckpointSaved,
+                        sessionId,
+                        "db_config_optimization",
+                        DateTimeOffset.UtcNow,
+                        new
+                        {
+                            runId,
+                            requestId = pendingRequest.Request.RequestId,
+                            checkpointId = checkpointRef,
+                            taskId,
+                            superstep
+                        }),
                     cancellationToken);
             }
 
-            await UpdateSessionFromStatusAsync(sessionId, runId, status, cancellationToken);
+            await UpdateSessionFromStatusAsync(sessionId, runId, status, checkpointRef, requestId, taskId, superstep, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -231,6 +251,10 @@ internal sealed class MafConfigWorkflowStarter
         Guid sessionId,
         string runId,
         RunStatus status,
+        string? checkpointId,
+        string? requestId,
+        Guid? taskId,
+        int superstep,
         CancellationToken cancellationToken)
     {
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -243,7 +267,7 @@ internal sealed class MafConfigWorkflowStarter
 
         if (status == RunStatus.Ended)
         {
-            session.Status = "completed";
+            session.Status = WorkflowSessionStatus.Completed;
             session.CompletedAt = DateTimeOffset.UtcNow;
 
             await _eventPublisher.PublishAsync(
@@ -252,12 +276,18 @@ internal sealed class MafConfigWorkflowStarter
                     sessionId,
                     "db_config_optimization",
                     DateTimeOffset.UtcNow,
-                    new { runId, message = "Config workflow completed." }),
+                    new
+                    {
+                        runId,
+                        checkpointId,
+                        superstep,
+                        message = "Config workflow completed."
+                    }),
                 cancellationToken);
         }
         else if (status == RunStatus.PendingRequests || status == RunStatus.Idle)
         {
-            session.Status = "suspended";
+            session.Status = WorkflowSessionStatus.WaitingForReview;
 
             await _eventPublisher.PublishAsync(
                 new WorkflowEventMessage(
@@ -265,7 +295,15 @@ internal sealed class MafConfigWorkflowStarter
                     sessionId,
                     "db_config_optimization",
                     DateTimeOffset.UtcNow,
-                    new { runId, message = "Config workflow is waiting for review." }),
+                    new
+                    {
+                        runId,
+                        requestId,
+                        checkpointId,
+                        taskId,
+                        superstep,
+                        message = "Config workflow is waiting for review."
+                    }),
                 cancellationToken);
         }
 
@@ -284,7 +322,7 @@ internal sealed class MafConfigWorkflowStarter
 
         if (session is not null)
         {
-            session.Status = "failed";
+            session.Status = WorkflowSessionStatus.Failed;
             session.ErrorMessage = ex.Message;
             session.CompletedAt = DateTimeOffset.UtcNow;
             session.UpdatedAt = DateTimeOffset.UtcNow;
@@ -300,10 +338,18 @@ internal sealed class MafConfigWorkflowStarter
                 new
                 {
                     runId,
+                    checkpointId = await TryGetCheckpointRefAsync(sessionId, cancellationToken),
                     errorMessage = ex.Message,
-                    exceptionType = ex.GetType().Name
+                    exceptionType = ex.GetType().Name,
+                    superstep = 0
                 }),
             cancellationToken);
+    }
+
+    private async Task<string?> TryGetCheckpointRefAsync(Guid sessionId, CancellationToken cancellationToken)
+    {
+        var runState = await _runStateStore.GetAsync(sessionId, cancellationToken);
+        return runState?.CheckpointRef;
     }
 }
 

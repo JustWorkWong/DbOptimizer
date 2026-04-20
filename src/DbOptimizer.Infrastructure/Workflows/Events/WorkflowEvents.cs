@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using DbOptimizer.Core.Models;
+using DbOptimizer.Infrastructure.Workflows.Projection;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -59,7 +60,9 @@ public interface IWorkflowEventQueryService
  * 2) 为 SSE 与回放提供进程内事件缓冲与订阅能力
  * 3) 保留结构化日志，便于联调和排障
  * ========================= */
-public sealed class WorkflowEventHub(ILogger<WorkflowEventHub> logger) : IWorkflowEventPublisher, IWorkflowEventQueryService
+public sealed class WorkflowEventHub(
+    ILogger<WorkflowEventHub> logger,
+    IWorkflowProjectionWriter? projectionWriter = null) : IWorkflowEventPublisher, IWorkflowEventQueryService
 {
     private const int MaxBufferedEventsPerSession = 512;
     private static readonly TimeSpan SessionRetention = TimeSpan.FromHours(1);
@@ -68,7 +71,7 @@ public sealed class WorkflowEventHub(ILogger<WorkflowEventHub> logger) : IWorkfl
 
     private readonly ConcurrentDictionary<Guid, SessionEventBuffer> _buffers = new();
 
-    public Task PublishAsync(WorkflowEventMessage workflowEvent, CancellationToken cancellationToken = default)
+    public async Task PublishAsync(WorkflowEventMessage workflowEvent, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         CleanupExpiredBuffers();
@@ -105,15 +108,29 @@ public sealed class WorkflowEventHub(ILogger<WorkflowEventHub> logger) : IWorkfl
             subscriber.TryWrite(record);
         }
 
+        if (projectionWriter is not null)
+        {
+            await projectionWriter.ApplyEventAsync(record.SessionId, record, cancellationToken);
+        }
+
+        var runId = TryGetString(record.Payload, "runId");
+        var requestId = TryGetString(record.Payload, "requestId");
+        var checkpointId = TryGetString(record.Payload, "checkpointId");
+        var superstep = TryGetLong(record.Payload, "superstep");
+
         logger.LogInformation(
-            "Workflow event published. EventType={EventType}, SessionId={SessionId}, WorkflowType={WorkflowType}, Sequence={Sequence}, Payload={Payload}",
+            "Workflow event published. EventType={EventType}, SessionId={SessionId}, WorkflowType={WorkflowType}, Sequence={Sequence}, RunId={RunId}, RequestId={RequestId}, CheckpointId={CheckpointId}, Superstep={Superstep}, Payload={Payload}",
             record.EventType,
             record.SessionId,
             record.WorkflowType,
             record.Sequence,
+            runId,
+            requestId,
+            checkpointId,
+            superstep,
             workflowEvent.Payload);
 
-        return Task.CompletedTask;
+        return;
     }
 
     public IReadOnlyList<WorkflowEventRecord> GetEvents(Guid sessionId, long afterSequence = 0, int limit = 200)
@@ -219,5 +236,27 @@ public sealed class WorkflowEventHub(ILogger<WorkflowEventHub> logger) : IWorkfl
         public List<WorkflowEventRecord> Events { get; } = [];
 
         public HashSet<ChannelWriter<WorkflowEventRecord>> Subscribers { get; } = [];
+    }
+
+    private static string? TryGetString(JsonElement payload, string propertyName)
+    {
+        return payload.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+    }
+
+    private static long? TryGetLong(JsonElement payload, string propertyName)
+    {
+        if (!payload.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.Number when property.TryGetInt64(out var value) => value,
+            JsonValueKind.String when long.TryParse(property.GetString(), out var value) => value,
+            _ => null
+        };
     }
 }

@@ -265,7 +265,7 @@
 
 ### 目标
 
-- [ ] 让业务事件来源从手写 runtime/starter 迁到 MAF run event 投影
+- [x] 让业务事件来源从手写 runtime/starter 迁到 MAF run event 投影
 
 ### Checklist
 
@@ -277,12 +277,12 @@
   - [ ] `失败/异常 -> WorkflowFailed`
 - [ ] 统一投影入口
   - [ ] `WorkflowProjectionWriter` 只消费统一事件源
-  - [ ] SSE / history / timeline 继续使用现有业务协议
+  - [x] SSE / history / timeline 继续使用现有业务协议
 - [ ] 删除重复手工发布
   - [ ] starter 中 `WorkflowStarted/WaitingReview/Completed/Failed` 的手工发布逻辑
   - [ ] runtime 中与 run event 重复的发布逻辑
 - [ ] 对齐前端兼容性
-  - [ ] 前端事件协议不变
+- [x] 前端事件协议不变
   - [ ] 事件 payload 保持兼容
 
 ### 主要涉及文件
@@ -300,30 +300,30 @@
 
 ### 验收
 
-- [ ] 业务事件明确来自 MAF run event 投影
+- [x] 业务事件明确来自 MAF run event 投影
 - [ ] starter/runtime 手工补事件显著减少或消失
 
 ## 8. 阶段 5：统一日志与可观测性
 
 ### 目标
 
-- [ ] 能从日志直接定位卡点、request、checkpoint、superstep
+- [x] 能从日志直接定位卡点、request、checkpoint、superstep
 
 ### Checklist
 
-- [ ] 为每个 run 统一日志字段
+- [x] 为每个 run 统一日志字段
   - [ ] `SessionId`
   - [ ] `RunId`
   - [ ] `WorkflowType`
   - [ ] `CheckpointId`
   - [ ] `RequestId`
   - [ ] `SuperStep`
-- [ ] 记录 superstep 级日志
+- [x] 记录 superstep 级日志
   - [ ] activated executors
   - [ ] pending messages
   - [ ] pending requests
   - [ ] checkpoint id
-- [ ] 记录 external request/response 日志
+- [x] 记录 external request/response 日志
   - [ ] request payload type
   - [ ] request id
   - [ ] task id
@@ -339,7 +339,7 @@
 
 ### 验收
 
-- [ ] 能回答“卡在哪个 executor / superstep / request / checkpoint”
+- [x] 能回答“卡在哪个 executor / superstep / request / checkpoint”
 - [ ] 不再出现只有 `session stuck` 但看不到引擎内部状态的情况
 
 ## 9. 阶段 6：清理旧路径与文档回写
@@ -493,9 +493,9 @@
 
 ### PR-E：事件投影与日志统一
 
-- [ ] run event 投影
-- [ ] 日志字段统一
-- [ ] SSE / history 验证
+- [x] run event 投影
+- [x] 日志字段统一
+- [x] SSE / history 验证
 
 #### 建议改动文件
 
@@ -507,9 +507,9 @@
 
 #### 验收重点
 
-- [ ] 前端事件协议不变
-- [ ] SSE/history/timeline 数据不重复不丢失
-- [ ] 日志能看到 request/checkpoint/superstep
+- [x] 前端事件协议不变
+- [x] SSE/history/timeline 数据不重复不丢失
+- [x] 日志能看到 request/checkpoint/superstep
 
 ### PR-F：旧路径清理与文档收尾
 
@@ -572,7 +572,7 @@
 - [ ] checkpoint 存在时可恢复
 - [ ] checkpoint 丢失时报错明确
 - [ ] requestId 不匹配时报错明确
-- [ ] 日志可定位卡点
+- [x] 日志可定位卡点
 - [ ] 前端协议不回归
 - [ ] README 与实现状态一致
 
@@ -587,7 +587,7 @@
 ### P1：强烈建议同轮完成
 
 - [ ] `PR-A` 状态校准与文档对齐
-- [ ] `PR-E` 事件投影与日志统一
+- [x] `PR-E` 事件投影与日志统一
 
 ### P2：收尾与治理
 

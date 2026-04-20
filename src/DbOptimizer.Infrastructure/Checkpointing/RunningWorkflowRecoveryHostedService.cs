@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using DbOptimizer.Infrastructure.Persistence;
+using DbOptimizer.Infrastructure.Workflows;
 using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.Infrastructure.Checkpointing;
@@ -22,7 +23,8 @@ public sealed class RunningWorkflowRecoveryHostedService(
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var runningSessionIds = await dbContext.WorkflowSessions
             .AsNoTracking()
-            .Where(x => x.Status == WorkflowCheckpointStatus.Running.ToString())
+            .Where(x => string.Equals(x.Status, WorkflowCheckpointStatus.Running.ToString(), StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(x.Status, WorkflowSessionStatus.Running, StringComparison.OrdinalIgnoreCase))
             .Select(x => x.SessionId)
             .ToListAsync(cancellationToken);
 

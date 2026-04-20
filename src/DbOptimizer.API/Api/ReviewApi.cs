@@ -145,7 +145,8 @@ internal sealed class ReviewApplicationService(
     IWorkflowResultSerializer workflowResultSerializer,
     IWorkflowReviewTaskGateway reviewTaskGateway,
     IWorkflowReviewResponseFactory reviewResponseFactory,
-    IMafWorkflowRuntime mafWorkflowRuntime) : IReviewApplicationService
+    IMafWorkflowRuntime mafWorkflowRuntime,
+    ILogger<ReviewApplicationService> logger) : IReviewApplicationService
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
@@ -334,6 +335,15 @@ internal sealed class ReviewApplicationService(
 
         var reviewedAt = DateTimeOffset.UtcNow;
         var adjustments = request.Adjustments ?? new Dictionary<string, JsonElement>();
+        logger.LogInformation(
+            "Submitting workflow review response. SessionId={SessionId}, TaskId={TaskId}, WorkflowType={WorkflowType}, RequestId={RequestId}, Action={Action}, AdjustmentCount={AdjustmentCount}",
+            correlation.SessionId,
+            taskId,
+            reviewTask.Session.WorkflowType,
+            correlation.RequestId,
+            normalizedAction,
+            adjustments.Count);
+
         var response = BuildExternalResponse(
             reviewTask.Session.WorkflowType,
             correlation.SessionId,
@@ -356,6 +366,14 @@ internal sealed class ReviewApplicationService(
             adjustments.Count > 0 ? JsonSerializer.Serialize(adjustments, SerializerOptions) : null,
             reviewedAt,
             cancellationToken);
+
+        logger.LogInformation(
+            "Workflow review response applied. SessionId={SessionId}, TaskId={TaskId}, WorkflowType={WorkflowType}, RequestId={RequestId}, Status={Status}",
+            correlation.SessionId,
+            taskId,
+            reviewTask.Session.WorkflowType,
+            correlation.RequestId,
+            MapReviewTaskStatus(normalizedAction));
 
         return new ReviewSubmitResponse(taskId, MapReviewTaskStatus(normalizedAction), reviewedAt);
     }
