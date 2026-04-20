@@ -68,8 +68,8 @@ public sealed class WorkflowApplicationService(
             SessionId: sessionId,
             DatabaseId: request.DatabaseId.Trim(),
             DatabaseType: databaseEngine,
-            AllowFallbackSnapshot: true,
-            RequireHumanReview: false);
+            AllowFallbackSnapshot: false,
+            RequireHumanReview: request.Options.RequireHumanReview);
 
         var mafResponse = await mafWorkflowRuntime.StartDbConfigOptimizationAsync(command, cancellationToken);
 

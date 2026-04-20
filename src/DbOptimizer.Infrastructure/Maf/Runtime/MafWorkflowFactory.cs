@@ -25,13 +25,13 @@ public sealed class MafWorkflowFactory : IMafWorkflowFactory
     public Workflow BuildSqlAnalysisWorkflow()
     {
         // 创建 executor bindings
-        var validation = CreateBinding<SqlInputValidationExecutor>("sql-validation");
-        var parser = CreateBinding<SqlParserMafExecutor>("sql-parser");
-        var plan = CreateBinding<ExecutionPlanMafExecutor>("execution-plan");
-        var indexAdvisor = CreateBinding<IndexAdvisorMafExecutor>("index-advisor");
-        var sqlRewrite = CreateBinding<SqlRewriteMafExecutor>("sql-rewrite");
-        var coordinator = CreateBinding<SqlCoordinatorMafExecutor>("sql-coordinator");
-        var reviewGate = CreateBinding<SqlHumanReviewGateExecutor>("sql-review-gate");
+        var validation = CreateBinding<SqlInputValidationExecutor, SqlAnalysis.SqlAnalysisWorkflowCommand, SqlAnalysis.SqlAnalysisWorkflowCommand>("sql_analysis");
+        var parser = CreateBinding<SqlParserMafExecutor, SqlAnalysis.SqlAnalysisWorkflowCommand, SqlAnalysis.SqlParsingCompletedMessage>("sql_analysis");
+        var plan = CreateBinding<ExecutionPlanMafExecutor, SqlAnalysis.SqlParsingCompletedMessage, SqlAnalysis.ExecutionPlanCompletedMessage>("sql_analysis");
+        var indexAdvisor = CreateBinding<IndexAdvisorMafExecutor, SqlAnalysis.ExecutionPlanCompletedMessage, SqlAnalysis.IndexRecommendationCompletedMessage>("sql_analysis");
+        var sqlRewrite = CreateBinding<SqlRewriteMafExecutor, SqlAnalysis.IndexRecommendationCompletedMessage, SqlAnalysis.SqlRewriteCompletedMessage>("sql_analysis");
+        var coordinator = CreateBinding<SqlCoordinatorMafExecutor, SqlAnalysis.SqlRewriteCompletedMessage, SqlAnalysis.SqlOptimizationDraftReadyMessage>("sql_analysis");
+        var reviewGate = CreateBinding<SqlHumanReviewGateExecutor, SqlAnalysis.SqlOptimizationDraftReadyMessage, SqlAnalysis.SqlOptimizationCompletedMessage>("sql_analysis");
 
         // 构建 workflow graph
         var builder = new WorkflowBuilder(validation);
@@ -62,11 +62,11 @@ public sealed class MafWorkflowFactory : IMafWorkflowFactory
     public Workflow BuildDbConfigWorkflow()
     {
         // 创建 executor bindings
-        var validation = CreateBinding<DbConfigInputValidationExecutor>("config-validation");
-        var collector = CreateBinding<ConfigCollectorMafExecutor>("config-collector");
-        var analyzer = CreateBinding<ConfigAnalyzerMafExecutor>("config-analyzer");
-        var coordinator = CreateBinding<ConfigCoordinatorMafExecutor>("config-coordinator");
-        var reviewGate = CreateBinding<ConfigHumanReviewGateExecutor>("config-review-gate");
+        var validation = CreateBinding<DbConfigInputValidationExecutor, DbConfig.DbConfigWorkflowCommand, DbConfig.DbConfigWorkflowCommand>("db_config_optimization");
+        var collector = CreateBinding<ConfigCollectorMafExecutor, DbConfig.DbConfigWorkflowCommand, DbConfig.ConfigSnapshotCollectedMessage>("db_config_optimization");
+        var analyzer = CreateBinding<ConfigAnalyzerMafExecutor, DbConfig.ConfigSnapshotCollectedMessage, DbConfig.ConfigRecommendationsGeneratedMessage>("db_config_optimization");
+        var coordinator = CreateBinding<ConfigCoordinatorMafExecutor, DbConfig.ConfigRecommendationsGeneratedMessage, DbConfig.DbConfigOptimizationDraftReadyMessage>("db_config_optimization");
+        var reviewGate = CreateBinding<ConfigHumanReviewGateExecutor, DbConfig.DbConfigOptimizationDraftReadyMessage, DbConfig.DbConfigOptimizationCompletedMessage>("db_config_optimization");
 
         // 构建 workflow graph
         var builder = new WorkflowBuilder(validation);
@@ -83,12 +83,17 @@ public sealed class MafWorkflowFactory : IMafWorkflowFactory
     /// <summary>
     /// 创建 ExecutorBinding
     /// </summary>
-    private ExecutorBinding CreateBinding<TExecutor>(string id) where TExecutor : Executor
+    private ExecutorBinding CreateBinding<TExecutor, TInput, TOutput>(string workflowType)
+        where TExecutor : Executor<TInput, TOutput>
     {
+        var executor = _serviceProvider.GetRequiredService<TExecutor>();
+        var instrumentation = _serviceProvider.GetRequiredService<IMafExecutorInstrumentation>();
+        var wrappedExecutor = new ObservedExecutor<TInput, TOutput>(workflowType, executor, instrumentation);
+
         return new ServiceProviderExecutorBinding(
-            id,
-            _ => ValueTask.FromResult<Executor>(_serviceProvider.GetRequiredService<TExecutor>()),
-            typeof(TExecutor),
+            wrappedExecutor.Id,
+            _ => ValueTask.FromResult<Executor>(wrappedExecutor),
+            wrappedExecutor.GetType(),
             null);
     }
 }

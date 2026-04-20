@@ -6,6 +6,7 @@
     <Project Path="src/DbOptimizer.AppHost/DbOptimizer.AppHost.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/DbOptimizer.AppHost.Tests/DbOptimizer.AppHost.Tests.csproj" />
     <Project Path="tests/DbOptimizer.API.Tests/DbOptimizer.API.Tests.csproj" />
     <Project Path="tests/DbOptimizer.BackendE2ETests/DbOptimizer.BackendE2ETests.csproj" />
     <Project Path="tests/DbOptimizer.PerformanceTests/DbOptimizer.PerformanceTests.csproj" />

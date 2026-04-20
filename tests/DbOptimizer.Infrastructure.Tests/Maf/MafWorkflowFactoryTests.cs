@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using DbOptimizer.Core.Models;
 using DbOptimizer.Infrastructure.Maf.Runtime;
 using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
 using DbOptimizer.Infrastructure.Maf.SqlAnalysis.Executors;
@@ -165,5 +166,24 @@ public sealed class MafWorkflowFactoryTests
         Assert.NotNull(workflow2);
         // 每次构建应该返回新的 workflow 实例
         Assert.NotSame(workflow1, workflow2);
+    }
+    [Fact]
+    public async Task BuildSqlAnalysisWorkflow_DescribeProtocolAsync_DoesNotThrow()
+    {
+        var workflow = _factory.BuildSqlAnalysisWorkflow();
+
+        var exception = await Record.ExceptionAsync(async () => await workflow.DescribeProtocolAsync());
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public async Task BuildDbConfigWorkflow_DescribeProtocolAsync_DoesNotThrow()
+    {
+        var workflow = _factory.BuildDbConfigWorkflow();
+
+        var exception = await Record.ExceptionAsync(async () => await workflow.DescribeProtocolAsync());
+
+        Assert.Null(exception);
     }
 }

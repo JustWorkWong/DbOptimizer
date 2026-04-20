@@ -64,7 +64,7 @@ public sealed record DbConfigWorkflowCommand(
     Guid SessionId,
     string DatabaseId,
     string DatabaseType,
-    bool AllowFallbackSnapshot = true,
+    bool AllowFallbackSnapshot = false,
     bool RequireHumanReview = false);
 
 /// <summary>

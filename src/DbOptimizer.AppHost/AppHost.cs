@@ -1,25 +1,26 @@
-using Microsoft.Extensions.Configuration;
-using System.Globalization;
 using Aspire.Hosting.MySql;
 using Aspire.Hosting.Postgres;
 using Aspire.Hosting.Redis;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+AppHostConfiguration.AddConfigurationSources(
+    builder.Configuration,
+    builder.AppHostDirectory,
+    builder.Environment.EnvironmentName);
 
-var apiPort = GetRequiredPort("DbOptimizer:Endpoints:ApiPort");
-var webPort = GetRequiredPort("DbOptimizer:Endpoints:WebPort");
-var postgresPort = GetRequiredPort("DbOptimizer:Databases:PostgreSql:Port");
-var mySqlPort = GetRequiredPort("DbOptimizer:Databases:MySql:Port");
-var redisPort = GetRequiredPort("DbOptimizer:Databases:Redis:Port");
+var apiPort = AppHostConfiguration.GetRequiredPort(builder.Configuration, "DbOptimizer:Endpoints:ApiPort");
+var webPort = AppHostConfiguration.GetRequiredPort(builder.Configuration, "DbOptimizer:Endpoints:WebPort");
+var postgresPort = AppHostConfiguration.GetRequiredPort(builder.Configuration, "DbOptimizer:Databases:PostgreSql:Port");
+var mySqlPort = AppHostConfiguration.GetRequiredPort(builder.Configuration, "DbOptimizer:Databases:MySql:Port");
+var redisPort = AppHostConfiguration.GetRequiredPort(builder.Configuration, "DbOptimizer:Databases:Redis:Port");
 const int pgAdminPort = 15050;
 const int phpMyAdminPort = 15051;
 const int redisInsightPort = 15540;
 
-var postgresUsername = GetRequiredValue("DbOptimizer:Databases:PostgreSql:Username");
-var postgresPasswordValue = GetRequiredValue("DbOptimizer:Databases:PostgreSql:Password");
-var mySqlPasswordValue = GetRequiredValue("DbOptimizer:Databases:MySql:Password");
+var postgresUsername = AppHostConfiguration.GetRequiredValue(builder.Configuration, "DbOptimizer:Databases:PostgreSql:Username");
+var postgresPasswordValue = AppHostConfiguration.GetRequiredValue(builder.Configuration, "DbOptimizer:Databases:PostgreSql:Password");
+var mySqlPasswordValue = AppHostConfiguration.GetRequiredValue(builder.Configuration, "DbOptimizer:Databases:MySql:Password");
 
 var postgresUser = builder.AddParameter("postgres-username", postgresUsername);
 var postgresPassword = builder.AddParameter("postgres-password", postgresPasswordValue, secret: true);
@@ -38,7 +39,7 @@ var postgres = builder.AddPostgres("postgres", userName: postgresUser, password:
         pgAdmin.WithHostPort(pgAdminPort);
     });
 
-var postgresDatabaseName = GetRequiredValue("DbOptimizer:Databases:PostgreSql:Database");
+var postgresDatabaseName = AppHostConfiguration.GetRequiredValue(builder.Configuration, "DbOptimizer:Databases:PostgreSql:Database");
 var postgresDb = postgres.AddDatabase("dboptimizer-postgres", postgresDatabaseName);
 
 var mySql = builder.AddMySql("mysql", password: mySqlPassword)
@@ -50,7 +51,7 @@ var mySql = builder.AddMySql("mysql", password: mySqlPassword)
         phpMyAdmin.WithHostPort(phpMyAdminPort);
     });
 
-var mySqlDatabaseName = GetRequiredValue("DbOptimizer:Databases:MySql:Database");
+var mySqlDatabaseName = AppHostConfiguration.GetRequiredValue(builder.Configuration, "DbOptimizer:Databases:MySql:Database");
 var mySqlDb = mySql.AddDatabase("dboptimizer-mysql", mySqlDatabaseName);
 
 var redis = builder.AddRedis("redis")
@@ -87,25 +88,3 @@ builder.AddViteApp("web", "../DbOptimizer.Web")
 builder.Build().Run();
 
 return;
-
-int GetRequiredPort(string key)
-{
-    var value = GetRequiredValue(key);
-    if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedPort) || parsedPort <= 0)
-    {
-        throw new InvalidOperationException($"Configuration value '{key}' must be a positive integer.");
-    }
-
-    return parsedPort;
-}
-
-string GetRequiredValue(string key)
-{
-    var value = builder.Configuration[key];
-    if (string.IsNullOrWhiteSpace(value))
-    {
-        throw new InvalidOperationException($"Missing required configuration value: {key}");
-    }
-
-    return value;
-}

@@ -20,10 +20,6 @@ public interface ITableIndexMetadataProvider
         CancellationToken cancellationToken = default);
 }
 
-/* =========================
- * 表索引元数据获取器
- * 规则与 ExecutionPlanProvider 保持一致：先 MCP，再按配置降级直连。
- * ========================= */
 public sealed class TableIndexMetadataProvider(
     IConfiguration configuration,
     ExecutionPlanOptions executionPlanOptions,
@@ -42,13 +38,17 @@ public sealed class TableIndexMetadataProvider(
         Exception? lastException = null;
         string? diagnosticTag = null;
 
-        if (serverOptions.Enabled)
+        if (!serverOptions.Enabled)
+        {
+            diagnosticTag = "mcp_disabled";
+        }
+        else
         {
             for (var attempt = 1; attempt <= executionPlanOptions.RetryCount + 1; attempt++)
             {
                 try
                 {
-                    return await InvokeMcpAsync(serverOptions, tableName, attempt, cancellationToken);
+                    return await InvokeMcpAsync(serverOptions, databaseEngine, tableName, attempt, cancellationToken);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -61,7 +61,7 @@ public sealed class TableIndexMetadataProvider(
 
                     logger.LogWarning(
                         ex,
-                        "表索引 MCP 调用失败。DatabaseEngine={DatabaseEngine}, Table={TableName}, Attempt={Attempt}/{MaxAttempts}",
+                        "Index metadata MCP call failed. DatabaseEngine={DatabaseEngine}, Table={TableName}, Attempt={Attempt}/{MaxAttempts}",
                         databaseEngine,
                         tableName,
                         attempt,
@@ -75,15 +75,11 @@ public sealed class TableIndexMetadataProvider(
                 }
             }
         }
-        else
-        {
-            diagnosticTag = "mcp_disabled";
-        }
 
         if (!executionPlanOptions.EnableDirectDbFallback)
         {
             throw new InvalidOperationException(
-                $"表索引 MCP 调用失败，且未开启直连降级。DatabaseEngine={databaseEngine}, Table={tableName}",
+                $"Index metadata MCP call failed. DatabaseEngine={databaseEngine}, Table={tableName}",
                 lastException);
         }
 
@@ -95,8 +91,41 @@ public sealed class TableIndexMetadataProvider(
             cancellationToken);
     }
 
+    private async Task<IndexMetadataInvocationResult> ExecuteFallbackAsync(
+        DatabaseOptimizationEngine databaseEngine,
+        string tableName,
+        int attemptCount,
+        string diagnosticTag,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var rawText = databaseEngine switch
+        {
+            DatabaseOptimizationEngine.PostgreSql => await LoadPostgreSqlIndexesAsync(tableName, cancellationToken),
+            DatabaseOptimizationEngine.MySql => await LoadMySqlIndexesAsync(tableName, cancellationToken),
+            _ => throw new InvalidOperationException("Unknown database engine for index metadata fallback.")
+        };
+
+        logger.LogWarning(
+            "Index metadata direct fallback executed. DatabaseEngine={DatabaseEngine}, Table={TableName}, DiagnosticTag={DiagnosticTag}",
+            databaseEngine,
+            tableName,
+            diagnosticTag);
+
+        return new IndexMetadataInvocationResult
+        {
+            ToolName = "show_indexes",
+            RawText = rawText,
+            UsedFallback = true,
+            AttemptCount = attemptCount,
+            DiagnosticTag = diagnosticTag,
+            ElapsedMs = stopwatch.ElapsedMilliseconds
+        };
+    }
+
     private async Task<IndexMetadataInvocationResult> InvokeMcpAsync(
         ExecutionPlanMcpServerOptions serverOptions,
+        DatabaseOptimizationEngine databaseEngine,
         string tableName,
         int attemptCount,
         CancellationToken cancellationToken)
@@ -107,15 +136,27 @@ public sealed class TableIndexMetadataProvider(
 
         if (!serverOptions.Transport.Equals("stdio", StringComparison.OrdinalIgnoreCase))
         {
-            throw new NotSupportedException($"暂不支持 MCP transport: {serverOptions.Transport}");
+            throw new NotSupportedException($"Unsupported MCP transport: {serverOptions.Transport}");
         }
 
         var transport = new StdioClientTransport(new StdioClientTransportOptions
         {
             Name = "DbOptimizer ShowIndexes MCP Client",
             Command = serverOptions.Command,
-            Arguments = ParseArguments(serverOptions.Arguments)
+            Arguments = ParseArguments(serverOptions.Arguments),
+            EnvironmentVariables = new Dictionary<string, string?>
+            {
+                ["DATABASE_URL"] = ResolveConnectionString(databaseEngine)
+            }
         });
+
+        logger.LogInformation(
+            "Starting index metadata MCP call. DatabaseEngine={DatabaseEngine}, Table={TableName}, Attempt={Attempt}, Command={Command}, Arguments={Arguments}",
+            databaseEngine,
+            tableName,
+            attemptCount,
+            serverOptions.Command,
+            serverOptions.Arguments);
 
         await using var client = await McpClient.CreateAsync(transport);
         var tools = await client.ListToolsAsync(cancellationToken: linkedCts.Token);
@@ -142,7 +183,7 @@ public sealed class TableIndexMetadataProvider(
 
         if (result.IsError == true)
         {
-            throw new InvalidOperationException($"MCP show_indexes 返回错误：{rawText}");
+            throw new InvalidOperationException($"MCP show_indexes returned an error: {rawText}");
         }
 
         return new IndexMetadataInvocationResult
@@ -150,38 +191,6 @@ public sealed class TableIndexMetadataProvider(
             ToolName = toolName,
             RawText = rawText,
             AttemptCount = attemptCount,
-            ElapsedMs = stopwatch.ElapsedMilliseconds
-        };
-    }
-
-    private async Task<IndexMetadataInvocationResult> ExecuteFallbackAsync(
-        DatabaseOptimizationEngine databaseEngine,
-        string tableName,
-        int attemptCount,
-        string diagnosticTag,
-        CancellationToken cancellationToken)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var rawText = databaseEngine switch
-        {
-            DatabaseOptimizationEngine.PostgreSql => await LoadPostgreSqlIndexesAsync(tableName, cancellationToken),
-            DatabaseOptimizationEngine.MySql => await LoadMySqlIndexesAsync(tableName, cancellationToken),
-            _ => throw new InvalidOperationException("Unknown database engine for index metadata fallback.")
-        };
-
-        logger.LogWarning(
-            "表索引读取走数据库直连降级。DatabaseEngine={DatabaseEngine}, Table={TableName}, DiagnosticTag={DiagnosticTag}",
-            databaseEngine,
-            tableName,
-            diagnosticTag);
-
-        return new IndexMetadataInvocationResult
-        {
-            ToolName = "show_indexes",
-            RawText = rawText,
-            UsedFallback = true,
-            AttemptCount = attemptCount,
-            DiagnosticTag = diagnosticTag,
             ElapsedMs = stopwatch.ElapsedMilliseconds
         };
     }
@@ -309,6 +318,16 @@ public sealed class TableIndexMetadataProvider(
         throw new InvalidOperationException("Missing MySQL connection string for show_indexes.");
     }
 
+    private string ResolveConnectionString(DatabaseOptimizationEngine databaseEngine)
+    {
+        return databaseEngine switch
+        {
+            DatabaseOptimizationEngine.PostgreSql => ResolvePostgreSqlConnectionString(),
+            DatabaseOptimizationEngine.MySql => ResolveMySqlConnectionString(),
+            _ => throw new InvalidOperationException("Unknown database engine for index metadata connection.")
+        };
+    }
+
     private static string ResolveToolName(IEnumerable<string> toolNames)
     {
         var availableTools = toolNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -320,7 +339,8 @@ public sealed class TableIndexMetadataProvider(
             }
         }
 
-        throw new InvalidOperationException($"No show_indexes tool alias matched. Available tools: {string.Join(", ", availableTools.OrderBy(name => name))}");
+        throw new InvalidOperationException(
+            $"No show_indexes tool alias matched. Available tools: {string.Join(", ", availableTools.OrderBy(name => name))}");
     }
 
     private static string[] ParseArguments(string rawArguments)

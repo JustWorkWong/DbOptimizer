@@ -128,7 +128,12 @@ public sealed class WorkflowApplicationServiceTests
         var request = new CreateDbConfigOptimizationWorkflowRequest
         {
             DatabaseId = "prod-db-01",
-            DatabaseType = "postgresql"
+            DatabaseType = "postgresql",
+            Options = new DbConfigWorkflowOptions
+            {
+                AllowFallbackSnapshot = true,
+                RequireHumanReview = true
+            }
         };
 
         var expectedResponse = new DbOptimizer.Infrastructure.Maf.Runtime.WorkflowStartResponse(
@@ -156,7 +161,9 @@ public sealed class WorkflowApplicationServiceTests
             x => x.StartDbConfigOptimizationAsync(
                 It.Is<DbConfigWorkflowCommand>(cmd =>
                     cmd.DatabaseId == request.DatabaseId.Trim() &&
-                    cmd.DatabaseType == "postgresql"),
+                    cmd.DatabaseType == "postgresql" &&
+                    cmd.AllowFallbackSnapshot == false &&
+                    cmd.RequireHumanReview),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }

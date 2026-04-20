@@ -17,18 +17,31 @@ public sealed class SubmitReviewRequest
 /// </summary>
 public sealed class SubmitReviewRequestValidator : AbstractValidator<SubmitReviewRequest>
 {
+    private const int MaxCommentLength = 2000;
+    private const int MaxModificationsLength = 100_000;
+
     public SubmitReviewRequestValidator()
     {
         RuleFor(x => x.Action)
             .NotEmpty()
             .WithMessage("Action is required.")
-            .Must(action => action == "approve" || action == "reject")
-            .WithMessage("Action must be 'approve' or 'reject'.");
+            .Must(action => action == "approve" || action == "reject" || action == "adjust")
+            .WithMessage("Action must be 'approve', 'reject', or 'adjust'.");
+
+        RuleFor(x => x.Comment)
+            .MaximumLength(MaxCommentLength)
+            .When(x => !string.IsNullOrEmpty(x.Comment))
+            .WithMessage($"Comment must be at most {MaxCommentLength} characters.");
 
         RuleFor(x => x.Comment)
             .NotEmpty()
-            .When(x => x.Action == "reject")
+            .When(x => string.Equals(x.Action, "reject", StringComparison.OrdinalIgnoreCase))
             .WithMessage("Comment is required when rejecting.");
+
+        RuleFor(x => x.Modifications)
+            .MaximumLength(MaxModificationsLength)
+            .When(x => !string.IsNullOrEmpty(x.Modifications))
+            .WithMessage($"Modifications must be at most {MaxModificationsLength} characters.");
 
         RuleFor(x => x.Modifications)
             .Must(BeValidJson)
@@ -39,7 +52,9 @@ public sealed class SubmitReviewRequestValidator : AbstractValidator<SubmitRevie
     private static bool BeValidJson(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
+        {
             return true;
+        }
 
         try
         {

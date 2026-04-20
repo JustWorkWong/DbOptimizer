@@ -3,52 +3,55 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DbOptimizer.Infrastructure.SlowQuery;
 
-/* =========================
- * 慢查询 Dashboard 查询服务实现
- * 职责：
- * 1) 从数据库查询慢查询趋势数据
- * 2) 从数据库查询慢查询告警
- * 3) 从数据库查询慢查询列表和详情
- * ========================= */
-
-public sealed class SlowQueryDashboardQueryService(DbOptimizerDbContext dbContext) : ISlowQueryDashboardQueryService
+public sealed class SlowQueryDashboardQueryService(
+    IDbContextFactory<DbOptimizerDbContext> dbContextFactory) : ISlowQueryDashboardQueryService
 {
     public async Task<SlowQueryTrendResponse> GetTrendAsync(
         string databaseId,
         int days,
         CancellationToken cancellationToken = default)
     {
-        var startDate = DateTimeOffset.UtcNow.AddDays(-days).Date;
-        var endDate = DateTimeOffset.UtcNow.Date;
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        // 按天聚合慢查询数据
-        var trendData = await dbContext.SlowQueries
+        var startDate = StartOfUtcDay(DateTimeOffset.UtcNow.AddDays(-days));
+
+        var trendRows = await dbContext.SlowQueries
             .Where(q => q.DatabaseId == databaseId && q.LastSeenAt >= startDate)
-            .GroupBy(q => q.LastSeenAt.Date)
+            .Select(q => new
+            {
+                q.LastSeenAt,
+                AvgExecutionTimeMs = q.AvgExecutionTime.TotalMilliseconds
+            })
+            .ToListAsync(cancellationToken);
+
+        var trendData = trendRows
+            .GroupBy(q => q.LastSeenAt.UtcDateTime.Date)
             .Select(g => new
             {
                 Date = g.Key,
                 SlowQueryCount = g.Count(),
-                AvgExecutionTimeMs = g.Average(q => q.AvgExecutionTime.TotalMilliseconds)
+                AvgExecutionTimeMs = g.Average(q => q.AvgExecutionTimeMs)
             })
             .OrderBy(x => x.Date)
-            .ToListAsync(cancellationToken);
+            .ToList();
 
-        // 查询每天触发的分析数量
-        var analysisData = await dbContext.WorkflowSessions
+        var analysisRows = await dbContext.WorkflowSessions
             .Where(s => s.SourceType == "slow-query" && s.CreatedAt >= startDate)
             .Join(
                 dbContext.SlowQueries.Where(q => q.DatabaseId == databaseId),
                 s => s.SourceRefId,
                 q => q.QueryId,
                 (s, q) => new { s.CreatedAt })
-            .GroupBy(x => x.CreatedAt.Date)
+            .ToListAsync(cancellationToken);
+
+        var analysisData = analysisRows
+            .GroupBy(x => x.CreatedAt.UtcDateTime.Date)
             .Select(g => new
             {
                 Date = g.Key,
                 Count = g.Count()
             })
-            .ToListAsync(cancellationToken);
+            .ToList();
 
         var analysisDict = analysisData.ToDictionary(x => x.Date, x => x.Count);
 
@@ -62,15 +65,19 @@ public sealed class SlowQueryDashboardQueryService(DbOptimizerDbContext dbContex
         return new SlowQueryTrendResponse(databaseId, days, points);
     }
 
+    internal static DateTimeOffset StartOfUtcDay(DateTimeOffset value)
+    {
+        return new DateTimeOffset(value.UtcDateTime.Date, TimeSpan.Zero);
+    }
+
     public async Task<SlowQueryAlertListResponse> GetAlertsAsync(
         string? databaseId,
         string? status,
         CancellationToken cancellationToken = default)
     {
-        // 简化实现：基于慢查询频率生成告警
-        // 规则：1小时内同一查询指纹出现 >= 10 次视为告警
-        var oneHourAgo = DateTimeOffset.UtcNow.AddHours(-1);
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
 
+        var oneHourAgo = DateTimeOffset.UtcNow.AddHours(-1);
         var query = dbContext.SlowQueries.AsQueryable();
 
         if (!string.IsNullOrEmpty(databaseId))
@@ -78,13 +85,12 @@ public sealed class SlowQueryDashboardQueryService(DbOptimizerDbContext dbContex
             query = query.Where(q => q.DatabaseId == databaseId);
         }
 
-        // 查找高频慢查询
         var alerts = await query
             .Where(q => q.LastSeenAt >= oneHourAgo && q.ExecutionCount >= 10)
             .OrderByDescending(q => q.ExecutionCount)
             .Take(50)
             .Select(q => new SlowQueryAlertItem(
-                Guid.NewGuid(), // 临时生成 AlertId
+                Guid.NewGuid(),
                 q.DatabaseId,
                 q.ExecutionCount >= 20 ? "high" : "medium",
                 q.QueryId,
@@ -104,6 +110,8 @@ public sealed class SlowQueryDashboardQueryService(DbOptimizerDbContext dbContex
         int pageSize,
         CancellationToken cancellationToken = default)
     {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
         var query = dbContext.SlowQueries.AsQueryable();
 
         if (!string.IsNullOrEmpty(databaseId))
@@ -142,6 +150,8 @@ public sealed class SlowQueryDashboardQueryService(DbOptimizerDbContext dbContex
         Guid queryId,
         CancellationToken cancellationToken = default)
     {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+
         var slowQuery = await dbContext.SlowQueries
             .Where(q => q.QueryId == queryId)
             .FirstOrDefaultAsync(cancellationToken);

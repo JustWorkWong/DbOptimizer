@@ -1,11 +1,11 @@
+using DbOptimizer.Core.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using DbOptimizer.Core.Models;
+using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using ModelContextProtocol.Client;
-using ModelContextProtocol.Protocol;
 
 namespace DbOptimizer.Infrastructure.Workflows;
 
@@ -17,20 +17,13 @@ public interface IConfigCollectionProvider
         CancellationToken cancellationToken = default);
 }
 
-/* =========================
- * ConfigCollectionProvider
- * 职责：
- * 1) 通过 MCP 调用收集数据库配置参数和系统指标
- * 2) MySQL: SHOW VARIABLES + SHOW STATUS
- * 3) PostgreSQL: SELECT * FROM pg_settings + pg_stat_database
- * 4) 错误处理：MCP 超时/失败时标记 UsedFallback
- * ========================= */
 public sealed class ConfigCollectionProvider(
     IConfiguration configuration,
     ConfigCollectionOptions configCollectionOptions,
     ILogger<ConfigCollectionProvider> logger) : IConfigCollectionProvider
 {
-    private static readonly string[] ConfigToolAliases = ["get_config", "get_configuration", "GetConfiguration", "show_variables"];
+    private static readonly string[] ConfigToolAliases =
+        ["get_config", "get_configuration", "GetConfiguration", "show_variables"];
 
     public async Task<DbConfigSnapshot> CollectConfigAsync(
         DbOptimizer.Core.Models.DatabaseOptimizationEngine databaseEngine,
@@ -44,7 +37,8 @@ public sealed class ConfigCollectionProvider(
 
         if (!serverOptions.Enabled)
         {
-            return CreateFallbackSnapshot(databaseId, databaseType, "MCP 未启用");
+            throw new InvalidOperationException(
+                $"Config collection MCP is disabled. DatabaseEngine={databaseEngine}, DatabaseId={databaseId}");
         }
 
         for (var attempt = 1; attempt <= configCollectionOptions.RetryCount + 1; attempt++)
@@ -61,14 +55,16 @@ public sealed class ConfigCollectionProvider(
             {
                 logger.LogWarning(
                     ex,
-                    "配置收集 MCP 调用失败。DatabaseEngine={DatabaseEngine}, Attempt={Attempt}/{MaxAttempts}",
+                    "Config collection MCP call failed. DatabaseEngine={DatabaseEngine}, Attempt={Attempt}/{MaxAttempts}",
                     databaseEngine,
                     attempt,
                     configCollectionOptions.RetryCount + 1);
 
                 if (attempt > configCollectionOptions.RetryCount)
                 {
-                    return CreateFallbackSnapshot(databaseId, databaseType, $"MCP 调用失败: {ex.Message}");
+                    throw new InvalidOperationException(
+                        $"Config collection MCP call failed. DatabaseEngine={databaseEngine}, DatabaseId={databaseId}",
+                        ex);
                 }
             }
 
@@ -79,7 +75,8 @@ public sealed class ConfigCollectionProvider(
             }
         }
 
-        return CreateFallbackSnapshot(databaseId, databaseType, "MCP 调用失败");
+        throw new InvalidOperationException(
+            $"Config collection MCP call failed. DatabaseEngine={databaseEngine}, DatabaseId={databaseId}");
     }
 
     private async Task<DbConfigSnapshot> InvokeMcpAsync(
@@ -95,15 +92,27 @@ public sealed class ConfigCollectionProvider(
 
         if (!serverOptions.Transport.Equals("stdio", StringComparison.OrdinalIgnoreCase))
         {
-            throw new NotSupportedException($"暂不支持 MCP transport: {serverOptions.Transport}");
+            throw new NotSupportedException($"Unsupported MCP transport: {serverOptions.Transport}");
         }
 
         var transport = new StdioClientTransport(new StdioClientTransportOptions
         {
             Name = "DbOptimizer ConfigCollection MCP Client",
             Command = serverOptions.Command,
-            Arguments = ParseArguments(serverOptions.Arguments)
+            Arguments = ParseArguments(serverOptions.Arguments),
+            EnvironmentVariables = new Dictionary<string, string?>
+            {
+                ["DATABASE_URL"] = ResolveConnectionString(databaseId, databaseType)
+            }
         });
+
+        logger.LogInformation(
+            "Starting config collection MCP call. DatabaseId={DatabaseId}, DatabaseType={DatabaseType}, Attempt={Attempt}, Command={Command}, Arguments={Arguments}",
+            databaseId,
+            databaseType,
+            attemptCount,
+            serverOptions.Command,
+            serverOptions.Arguments);
 
         await using var client = await McpClient.CreateAsync(transport);
         var tools = await client.ListToolsAsync(cancellationToken: linkedCts.Token);
@@ -126,13 +135,13 @@ public sealed class ConfigCollectionProvider(
 
         if (result.IsError == true)
         {
-            throw new InvalidOperationException($"MCP config collection 返回错误：{rawText}");
+            throw new InvalidOperationException($"MCP config collection returned an error: {rawText}");
         }
 
         var snapshot = ParseConfigResponse(databaseId, databaseType, rawText);
 
         logger.LogInformation(
-            "配置收集成功。DatabaseId={DatabaseId}, DatabaseType={DatabaseType}, ParameterCount={ParameterCount}, Elapsed={ElapsedMs}ms",
+            "Config collection succeeded. DatabaseId={DatabaseId}, DatabaseType={DatabaseType}, ParameterCount={ParameterCount}, Elapsed={ElapsedMs}ms",
             databaseId,
             databaseType,
             snapshot.Parameters.Count,
@@ -147,35 +156,32 @@ public sealed class ConfigCollectionProvider(
 
         foreach (var alias in ConfigToolAliases)
         {
-            var match = toolList.FirstOrDefault(t =>
-                string.Equals(t, alias, StringComparison.OrdinalIgnoreCase));
-
-            if (match != null)
+            var match = toolList.FirstOrDefault(t => string.Equals(t, alias, StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
             {
                 return match;
             }
         }
 
         throw new InvalidOperationException(
-            $"MCP 服务器未提供配置收集工具。可用工具：{string.Join(", ", toolList)}");
+            $"MCP server does not expose a config collection tool. Available tools: {string.Join(", ", toolList)}");
     }
 
     private ConfigCollectionMcpServerOptions ResolveServerOptions(DbOptimizer.Core.Models.DatabaseOptimizationEngine databaseEngine)
     {
-        var sectionName = databaseEngine switch
+        var serverOptions = databaseEngine switch
         {
-            DbOptimizer.Core.Models.DatabaseOptimizationEngine.MySql => "DbOptimizer:ConfigCollection:MySql",
-            DbOptimizer.Core.Models.DatabaseOptimizationEngine.PostgreSql => "DbOptimizer:ConfigCollection:PostgreSql",
-            _ => throw new NotSupportedException($"不支持的数据库引擎：{databaseEngine}")
+            DbOptimizer.Core.Models.DatabaseOptimizationEngine.MySql => configCollectionOptions.MySql,
+            DbOptimizer.Core.Models.DatabaseOptimizationEngine.PostgreSql => configCollectionOptions.PostgreSql,
+            _ => throw new NotSupportedException($"Unsupported database engine: {databaseEngine}")
         };
 
-        var section = configuration.GetSection(sectionName);
         return new ConfigCollectionMcpServerOptions
         {
-            Enabled = section.GetValue<bool>("Enabled"),
-            Transport = section.GetValue<string>("Transport") ?? "stdio",
-            Command = section.GetValue<string>("Command") ?? string.Empty,
-            Arguments = section.GetValue<string>("Arguments") ?? string.Empty
+            Enabled = serverOptions.Enabled,
+            Transport = serverOptions.Transport,
+            Command = serverOptions.Command,
+            Arguments = serverOptions.Arguments
         };
     }
 
@@ -222,11 +228,70 @@ public sealed class ConfigCollectionProvider(
         current.Clear();
     }
 
+    private string ResolveConnectionString(string databaseId, string databaseType)
+    {
+        var targetDatabase = configuration[$"TargetDatabases:{databaseId}"];
+        if (!string.IsNullOrWhiteSpace(targetDatabase))
+        {
+            return targetDatabase;
+        }
+
+        return databaseType.Contains("postgres", StringComparison.OrdinalIgnoreCase)
+            ? ResolvePostgreSqlConnectionString()
+            : ResolveMySqlConnectionString();
+    }
+
+    private string ResolvePostgreSqlConnectionString()
+    {
+        var fromAspire = configuration.GetConnectionString("dboptimizer-postgres");
+        if (!string.IsNullOrWhiteSpace(fromAspire))
+        {
+            return fromAspire;
+        }
+
+        var fallback = configuration.GetConnectionString("PostgreSql");
+        if (!string.IsNullOrWhiteSpace(fallback))
+        {
+            return fallback;
+        }
+
+        var nested = configuration["DbOptimizer:ConnectionStrings:PostgreSql"];
+        if (!string.IsNullOrWhiteSpace(nested))
+        {
+            return nested;
+        }
+
+        throw new InvalidOperationException("Missing PostgreSQL connection string for config collection.");
+    }
+
+    private string ResolveMySqlConnectionString()
+    {
+        var fromAspire = configuration.GetConnectionString("dboptimizer-mysql");
+        if (!string.IsNullOrWhiteSpace(fromAspire))
+        {
+            return fromAspire;
+        }
+
+        var fallback = configuration.GetConnectionString("MySql");
+        if (!string.IsNullOrWhiteSpace(fallback))
+        {
+            return fallback;
+        }
+
+        var nested = configuration["DbOptimizer:ConnectionStrings:MySql"];
+        if (!string.IsNullOrWhiteSpace(nested))
+        {
+            return nested;
+        }
+
+        throw new InvalidOperationException("Missing MySQL connection string for config collection.");
+    }
+
     private DbConfigSnapshot ParseConfigResponse(string databaseId, string databaseType, string responseText)
     {
         try
         {
-            var jsonDoc = JsonDocument.Parse(responseText);
+            using var jsonDoc = JsonDocument.Parse(responseText);
             var root = jsonDoc.RootElement;
 
             var parameters = new List<ConfigParameter>();
@@ -248,12 +313,8 @@ public sealed class ConfigCollectionProvider(
                         Type = param.TryGetProperty("type", out var type)
                             ? type.GetString() ?? string.Empty
                             : string.Empty,
-                        MinValue = param.TryGetProperty("min_value", out var minVal)
-                            ? minVal.GetString()
-                            : null,
-                        MaxValue = param.TryGetProperty("max_value", out var maxVal)
-                            ? maxVal.GetString()
-                            : null
+                        MinValue = param.TryGetProperty("min_value", out var minVal) ? minVal.GetString() : null,
+                        MaxValue = param.TryGetProperty("max_value", out var maxVal) ? maxVal.GetString() : null
                     });
                 }
             }
@@ -263,33 +324,15 @@ public sealed class ConfigCollectionProvider(
             {
                 metrics = new SystemMetrics
                 {
-                    CpuCores = metricsElement.TryGetProperty("cpu_cores", out var cpuCores)
-                        ? cpuCores.GetInt32()
-                        : 0,
-                    TotalMemoryBytes = metricsElement.TryGetProperty("total_memory_bytes", out var totalMem)
-                        ? totalMem.GetInt64()
-                        : 0,
-                    AvailableMemoryBytes = metricsElement.TryGetProperty("available_memory_bytes", out var availMem)
-                        ? availMem.GetInt64()
-                        : 0,
-                    TotalDiskBytes = metricsElement.TryGetProperty("total_disk_bytes", out var totalDisk)
-                        ? totalDisk.GetInt64()
-                        : 0,
-                    AvailableDiskBytes = metricsElement.TryGetProperty("available_disk_bytes", out var availDisk)
-                        ? availDisk.GetInt64()
-                        : 0,
-                    DatabaseVersion = metricsElement.TryGetProperty("database_version", out var dbVer)
-                        ? dbVer.GetString() ?? string.Empty
-                        : string.Empty,
-                    UptimeSeconds = metricsElement.TryGetProperty("uptime_seconds", out var uptime)
-                        ? uptime.GetInt64()
-                        : 0,
-                    ActiveConnections = metricsElement.TryGetProperty("active_connections", out var activeConn)
-                        ? activeConn.GetInt32()
-                        : 0,
-                    MaxConnections = metricsElement.TryGetProperty("max_connections", out var maxConn)
-                        ? maxConn.GetInt32()
-                        : 0
+                    CpuCores = metricsElement.TryGetProperty("cpu_cores", out var cpuCores) ? cpuCores.GetInt32() : 0,
+                    TotalMemoryBytes = metricsElement.TryGetProperty("total_memory_bytes", out var totalMem) ? totalMem.GetInt64() : 0,
+                    AvailableMemoryBytes = metricsElement.TryGetProperty("available_memory_bytes", out var availMem) ? availMem.GetInt64() : 0,
+                    TotalDiskBytes = metricsElement.TryGetProperty("total_disk_bytes", out var totalDisk) ? totalDisk.GetInt64() : 0,
+                    AvailableDiskBytes = metricsElement.TryGetProperty("available_disk_bytes", out var availDisk) ? availDisk.GetInt64() : 0,
+                    DatabaseVersion = metricsElement.TryGetProperty("database_version", out var dbVer) ? dbVer.GetString() ?? string.Empty : string.Empty,
+                    UptimeSeconds = metricsElement.TryGetProperty("uptime_seconds", out var uptime) ? uptime.GetInt64() : 0,
+                    ActiveConnections = metricsElement.TryGetProperty("active_connections", out var activeConn) ? activeConn.GetInt32() : 0,
+                    MaxConnections = metricsElement.TryGetProperty("max_connections", out var maxConn) ? maxConn.GetInt32() : 0
                 };
             }
 
@@ -305,22 +348,10 @@ public sealed class ConfigCollectionProvider(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "解析配置响应失败。DatabaseId={DatabaseId}", databaseId);
-            return CreateFallbackSnapshot(databaseId, databaseType, $"解析响应失败: {ex.Message}");
+            logger.LogWarning(ex, "Failed to parse config response. DatabaseId={DatabaseId}", databaseId);
+            throw new InvalidOperationException(
+                $"Failed to parse config collection response. DatabaseId={databaseId}",
+                ex);
         }
-    }
-
-    private static DbConfigSnapshot CreateFallbackSnapshot(string databaseId, string databaseType, string reason)
-    {
-        return new DbConfigSnapshot
-        {
-            DatabaseType = databaseType,
-            DatabaseId = databaseId,
-            Parameters = Array.Empty<ConfigParameter>(),
-            Metrics = new SystemMetrics(),
-            CollectedAt = DateTimeOffset.UtcNow,
-            UsedFallback = true,
-            FallbackReason = reason
-        };
     }
 }

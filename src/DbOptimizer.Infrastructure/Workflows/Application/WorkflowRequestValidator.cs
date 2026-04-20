@@ -103,6 +103,6 @@ public sealed class SqlAnalysisWorkflowOptions
 /// </summary>
 public sealed class DbConfigWorkflowOptions
 {
-    public bool AllowFallbackSnapshot { get; init; } = true;
+    public bool AllowFallbackSnapshot { get; init; } = false;
     public bool RequireHumanReview { get; init; } = true;
 }
