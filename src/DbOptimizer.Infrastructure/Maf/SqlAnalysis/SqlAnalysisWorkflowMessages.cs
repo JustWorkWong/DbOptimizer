@@ -51,12 +51,14 @@ public sealed record SqlOptimizationDraftReadyMessage(
     Guid SessionId,
     DbOptimizer.Core.Models.WorkflowResultEnvelope DraftResult);
 
-public sealed record ReviewDecisionResponseMessage(
+public sealed record SqlReviewRequestMessage(
     Guid SessionId,
     Guid TaskId,
-    string RequestId,
-    string RunId,
-    string CheckpointRef,
+    DbOptimizer.Core.Models.WorkflowResultEnvelope DraftResult);
+
+public sealed record SqlReviewResponseMessage(
+    Guid SessionId,
+    Guid TaskId,
     string Action,
     string? Comment,
     IReadOnlyDictionary<string, JsonElement> Adjustments,

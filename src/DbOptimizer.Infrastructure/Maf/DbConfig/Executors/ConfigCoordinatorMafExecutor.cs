@@ -88,7 +88,8 @@ public sealed class ConfigCoordinatorMafExecutor(
             workflowType = "DbConfigOptimization",
             generatedAt = DateTimeOffset.UtcNow,
             databaseType = message.Snapshot.DatabaseType,
-            databaseId = message.Snapshot.DatabaseId
+            databaseId = message.Snapshot.DatabaseId,
+            requireHumanReview = message.Command.RequireHumanReview
         };
 
         var envelope = new WorkflowResultEnvelope

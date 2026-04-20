@@ -7,8 +7,10 @@ using DbOptimizer.Infrastructure.Workflows.Application;
 using DbOptimizer.Infrastructure.Workflows.Review;
 using DbOptimizer.Infrastructure.Maf.Runtime;
 using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
+using Microsoft.Agents.AI.Workflows;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace DbOptimizer.API.Tests;
@@ -40,43 +42,41 @@ public sealed class ReviewApplicationServiceTests
     }
 
     [Fact]
-    public async Task SubmitAsync_Reject_ThrowsNotSupportedException()
+    public async Task SubmitAsync_Reject_ReturnsRejectedStatus()
     {
         await using var harness = await ReviewServiceHarness.CreateAsync();
         var service = harness.CreateService();
 
-        await Assert.ThrowsAsync<NotSupportedException>(async () =>
-        {
-            await service.SubmitAsync(
-                harness.ReviewTaskId,
-                new SubmitReviewRequest
-                {
-                    Action = "reject",
-                    Comment = "need different index"
-                });
-        });
+        var result = await service.SubmitAsync(
+            harness.ReviewTaskId,
+            new SubmitReviewRequest
+            {
+                Action = "reject",
+                Comment = "need different index"
+            });
+
+        Assert.Equal("Rejected", result.Status);
     }
 
     [Fact]
-    public async Task SubmitAsync_Adjust_ThrowsNotSupportedException()
+    public async Task SubmitAsync_Adjust_ReturnsAdjustedStatus()
     {
         await using var harness = await ReviewServiceHarness.CreateAsync();
         var service = harness.CreateService();
 
-        await Assert.ThrowsAsync<NotSupportedException>(async () =>
-        {
-            await service.SubmitAsync(
-                harness.ReviewTaskId,
-                new SubmitReviewRequest
+        var result = await service.SubmitAsync(
+            harness.ReviewTaskId,
+            new SubmitReviewRequest
+            {
+                Action = "adjust",
+                Comment = "rename the index",
+                Adjustments = new Dictionary<string, JsonElement>
                 {
-                    Action = "adjust",
-                    Comment = "rename the index",
-                    Adjustments = new Dictionary<string, JsonElement>
-                    {
-                        ["indexName"] = JsonSerializer.SerializeToElement("idx_users_age_v2")
-                    }
-                });
-        });
+                    ["indexName"] = JsonSerializer.SerializeToElement("idx_users_age_v2")
+                }
+            });
+
+        Assert.Equal("Adjusted", result.Status);
     }
 
     private sealed class ReviewServiceHarness : IAsyncDisposable
@@ -106,9 +106,11 @@ public sealed class ReviewApplicationServiceTests
             return new ReviewApplicationService(
                 DbContextFactory,
                 new WorkflowResultSerializer(),
-                new StubWorkflowReviewTaskGateway(),
+                new WorkflowReviewTaskGateway(
+                    DbContextFactory,
+                    NullLogger<WorkflowReviewTaskGateway>.Instance),
                 new StubWorkflowReviewResponseFactory(),
-                new StubMafWorkflowRuntime());
+                new StubMafWorkflowRuntime(DbContextFactory));
         }
 
         public static async Task<ReviewServiceHarness> CreateAsync()
@@ -142,7 +144,7 @@ public sealed class ReviewApplicationServiceTests
                 TaskId = reviewTaskId,
                 SessionId = sessionId,
                 Status = "Pending",
-                Recommendations = JsonSerializer.Serialize(report),
+                Recommendations = JsonSerializer.Serialize(CreateEnvelope(report), SerializerOptions),
                 CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-1)
             });
 
@@ -187,6 +189,23 @@ public sealed class ReviewApplicationServiceTests
                 Metadata = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
             };
         }
+
+        private static WorkflowResultEnvelope CreateEnvelope(OptimizationReport report)
+        {
+            return new WorkflowResultEnvelope
+            {
+                ResultType = "sql_optimization",
+                DisplayName = "SQL Optimization Result",
+                Summary = report.Summary,
+                Data = JsonSerializer.SerializeToElement(report, SerializerOptions),
+                Metadata = JsonSerializer.SerializeToElement(
+                    new Dictionary<string, object>
+                    {
+                        ["databaseId"] = "test-db"
+                    },
+                    SerializerOptions)
+            };
+        }
     }
 
     private sealed class TestDbContextFactory(DbContextOptions<DbOptimizerDbContext> options) : IDbContextFactory<DbOptimizerDbContext>
@@ -202,84 +221,42 @@ public sealed class ReviewApplicationServiceTests
         }
     }
 
-    private sealed class StubWorkflowReviewTaskGateway : IWorkflowReviewTaskGateway
-    {
-        public Task<Guid> CreateAsync(
-            Guid sessionId,
-            string taskType,
-            string requestId,
-            string engineRunId,
-            string checkpointRef,
-            WorkflowResultEnvelope payload,
-            CancellationToken cancellationToken = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task<ReviewTaskCorrelation?> GetCorrelationAsync(
-            Guid taskId,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult<ReviewTaskCorrelation?>(new ReviewTaskCorrelation(
-                SessionId: Guid.NewGuid(),
-                WorkflowType: "sql_analysis",
-                RequestId: "test-request-id",
-                EngineRunId: "test-run-id",
-                CheckpointRef: "test-checkpoint",
-                Payload: new WorkflowResultEnvelope
-                {
-                    ResultType = "sql_optimization",
-                    DisplayName = "SQL Optimization Result",
-                    Summary = "Test summary",
-                    Data = JsonDocument.Parse("{}").RootElement,
-                    Metadata = JsonDocument.Parse("{}").RootElement
-                }
-            ));
-        }
-
-        public Task UpdateStatusAsync(
-            Guid taskId,
-            string status,
-            string? comment,
-            string? adjustmentsJson,
-            DateTimeOffset reviewedAt,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.CompletedTask;
-        }
-    }
-
     private sealed class StubWorkflowReviewResponseFactory : IWorkflowReviewResponseFactory
     {
-        public ReviewDecisionResponseMessage CreateSqlResponse(
+        private static readonly WorkflowResultEnvelope PlaceholderEnvelope = new()
+        {
+            ResultType = "review_request",
+            DisplayName = "Review Request",
+            Summary = string.Empty,
+            Data = JsonSerializer.SerializeToElement(new { }),
+            Metadata = JsonSerializer.SerializeToElement(new { })
+        };
+
+        public ExternalResponse CreateSqlResponse(
             Guid sessionId,
             Guid taskId,
             string requestId,
-            string runId,
-            string checkpointRef,
             string action,
             string? comment,
             IReadOnlyDictionary<string, JsonElement> adjustments)
         {
-            return new ReviewDecisionResponseMessage(
-                SessionId: sessionId,
-                TaskId: taskId,
-                RequestId: requestId,
-                RunId: runId,
-                CheckpointRef: checkpointRef,
-                Action: action,
-                Comment: comment,
-                Adjustments: adjustments,
-                ReviewedAt: DateTimeOffset.UtcNow
-            );
+            return ExternalRequest.Create(
+                    MafReviewPorts.SqlReview,
+                    new SqlReviewRequestMessage(sessionId, taskId, PlaceholderEnvelope),
+                    requestId)
+                .CreateResponse(new SqlReviewResponseMessage(
+                    sessionId,
+                    taskId,
+                    action,
+                    comment,
+                    adjustments,
+                    DateTimeOffset.UtcNow));
         }
 
-        public DbOptimizer.Infrastructure.Maf.DbConfig.ConfigReviewDecisionResponseMessage CreateDbConfigResponse(
+        public ExternalResponse CreateDbConfigResponse(
             Guid sessionId,
             Guid taskId,
             string requestId,
-            string runId,
-            string checkpointRef,
             string action,
             string? comment,
             IReadOnlyDictionary<string, JsonElement> adjustments)
@@ -288,7 +265,7 @@ public sealed class ReviewApplicationServiceTests
         }
     }
 
-    private sealed class StubMafWorkflowRuntime : IMafWorkflowRuntime
+    private sealed class StubMafWorkflowRuntime(TestDbContextFactory dbContextFactory) : IMafWorkflowRuntime
     {
         public Task<DbOptimizer.Infrastructure.Maf.Runtime.WorkflowStartResponse> StartSqlAnalysisAsync(
             DbOptimizer.Infrastructure.Maf.Runtime.SqlAnalysisWorkflowCommand command,
@@ -312,20 +289,19 @@ public sealed class ReviewApplicationServiceTests
         }
 
         public Task<DbOptimizer.Infrastructure.Maf.Runtime.WorkflowResumeResponse> ResumeSqlWorkflowAsync(
-            ReviewDecisionResponseMessage reviewResponse,
+            Guid sessionId,
+            ExternalResponse reviewResponse,
             CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(new DbOptimizer.Infrastructure.Maf.Runtime.WorkflowResumeResponse(
-                SessionId: reviewResponse.SessionId,
-                Status: "Completed"
-            ));
+            return UpdateSessionAndReturnAsync(sessionId, cancellationToken);
         }
 
         public Task<DbOptimizer.Infrastructure.Maf.Runtime.WorkflowResumeResponse> ResumeConfigWorkflowAsync(
-            DbOptimizer.Infrastructure.Maf.DbConfig.ConfigReviewDecisionResponseMessage reviewResponse,
+            Guid sessionId,
+            ExternalResponse reviewResponse,
             CancellationToken cancellationToken = default)
         {
-            throw new NotSupportedException();
+            return UpdateSessionAndReturnAsync(sessionId, cancellationToken);
         }
 
         public Task<DbOptimizer.Infrastructure.Maf.Runtime.WorkflowCancelResponse> CancelAsync(
@@ -333,6 +309,22 @@ public sealed class ReviewApplicationServiceTests
             CancellationToken cancellationToken = default)
         {
             throw new NotSupportedException();
+        }
+
+        private async Task<DbOptimizer.Infrastructure.Maf.Runtime.WorkflowResumeResponse> UpdateSessionAndReturnAsync(
+            Guid sessionId,
+            CancellationToken cancellationToken)
+        {
+            await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var session = await dbContext.WorkflowSessions.SingleAsync(item => item.SessionId == sessionId, cancellationToken);
+            session.Status = "Completed";
+            session.CompletedAt = DateTimeOffset.UtcNow;
+            session.UpdatedAt = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            return new DbOptimizer.Infrastructure.Maf.Runtime.WorkflowResumeResponse(
+                SessionId: sessionId,
+                Status: "Completed");
         }
     }
 }

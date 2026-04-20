@@ -4,7 +4,6 @@ using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
 using Microsoft.Agents.AI.Workflows;
-using Microsoft.Agents.AI.Workflows.Checkpointing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -12,6 +11,8 @@ namespace DbOptimizer.Infrastructure.Maf.Runtime;
 
 public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
 {
+    private static readonly string[] WaitingStatuses = ["suspended", "WaitingReview", "WaitingForReview"];
+
     private readonly IMafWorkflowFactory _workflowFactory;
     private readonly IMafRunStateStore _runStateStore;
     private readonly IDbContextFactory<DbOptimizerDbContext> _dbContextFactory;
@@ -130,255 +131,41 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
         Guid sessionId,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation(
-            "Resuming workflow. SessionId={SessionId}",
-            sessionId);
+        var (session, runState, workflow) = await LoadResumeContextAsync(sessionId, cancellationToken);
 
-        try
-        {
-            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cancellationToken);
+        session.Status = "running";
+        session.UpdatedAt = DateTimeOffset.UtcNow;
 
-            if (session is null)
-            {
-                _logger.LogError("Session not found. SessionId={SessionId}", sessionId);
-                throw new InvalidOperationException($"Session {sessionId} not found");
-            }
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        dbContext.Attach(session);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
-            if (session.Status != "suspended")
-            {
-                _logger.LogError(
-                    "Session is not suspended. SessionId={SessionId}, Status={Status}",
-                    sessionId,
-                    session.Status);
-                throw new InvalidOperationException(
-                    $"Session {sessionId} is not suspended (current status: {session.Status})");
-            }
+        await using var run = await InProcessExecution.ResumeAsync(
+            workflow,
+            new CheckpointInfo(sessionId.ToString(), runState.CheckpointRef),
+            _checkpointManager,
+            cancellationToken);
 
-            var runState = await _runStateStore.GetAsync(sessionId, cancellationToken);
-            if (runState is null)
-            {
-                _logger.LogError("Checkpoint not found. SessionId={SessionId}", sessionId);
-                throw new InvalidOperationException($"Checkpoint for session {sessionId} not found");
-            }
+        var status = await run.GetStatusAsync(cancellationToken);
+        await UpdateSessionAfterResumeAsync(sessionId, runState.RunId, status, null, cancellationToken);
 
-            _ = session.WorkflowType switch
-            {
-                "sql_analysis" => _workflowFactory.BuildSqlAnalysisWorkflow(),
-                "db_config_optimization" => _workflowFactory.BuildDbConfigWorkflow(),
-                _ => throw new InvalidOperationException($"Unknown workflow type: {session.WorkflowType}")
-            };
-
-            session.Status = "running";
-            session.UpdatedAt = DateTimeOffset.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            _logger.LogWarning(
-                "Checkpoint resume is not fully implemented yet. SessionId={SessionId}, RunId={RunId}",
-                sessionId,
-                runState.RunId);
-
-            return new WorkflowResumeResponse(
-                SessionId: sessionId,
-                Status: "running");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "Failed to resume workflow. SessionId={SessionId}",
-                sessionId);
-            throw;
-        }
+        return new WorkflowResumeResponse(sessionId, MapResumeStatus(status));
     }
 
-    public async Task<WorkflowResumeResponse> ResumeSqlWorkflowAsync(
-        SqlAnalysis.ReviewDecisionResponseMessage reviewResponse,
+    public Task<WorkflowResumeResponse> ResumeSqlWorkflowAsync(
+        Guid sessionId,
+        ExternalResponse reviewResponse,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(reviewResponse);
-
-        _logger.LogInformation(
-            "Resuming SQL workflow with review response. SessionId={SessionId}, TaskId={TaskId}, Action={Action}",
-            reviewResponse.SessionId,
-            reviewResponse.TaskId,
-            reviewResponse.Action);
-
-        try
-        {
-            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            var session = await dbContext.WorkflowSessions.FindAsync([reviewResponse.SessionId], cancellationToken);
-
-            if (session is null)
-            {
-                throw new InvalidOperationException($"Session {reviewResponse.SessionId} not found");
-            }
-
-            if (session.Status != "suspended")
-            {
-                throw new InvalidOperationException(
-                    $"Session {reviewResponse.SessionId} is not suspended (current status: {session.Status})");
-            }
-
-            if (reviewResponse.Action == "reject")
-            {
-                session.Status = "failed";
-                session.ErrorMessage = $"Review rejected: {reviewResponse.Comment}";
-                session.CompletedAt = DateTimeOffset.UtcNow;
-            }
-            else
-            {
-                session.Status = "running";
-            }
-
-            session.UpdatedAt = DateTimeOffset.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            if (reviewResponse.Action == "reject")
-            {
-                _logger.LogWarning(
-                    "SQL workflow rejected. SessionId={SessionId}, Comment={Comment}",
-                    reviewResponse.SessionId,
-                    reviewResponse.Comment);
-
-                return new WorkflowResumeResponse(
-                    SessionId: reviewResponse.SessionId,
-                    Status: "failed");
-            }
-
-            RunInBackground(
-                async _ =>
-                {
-                    _logger.LogInformation(
-                        "SQL workflow resume execution started. SessionId={SessionId}",
-                        reviewResponse.SessionId);
-
-                    await using var ctx = await _dbContextFactory.CreateDbContextAsync(CancellationToken.None);
-                    var resumedSession = await ctx.WorkflowSessions.FindAsync([reviewResponse.SessionId], CancellationToken.None);
-                    if (resumedSession is not null)
-                    {
-                        resumedSession.Status = "completed";
-                        resumedSession.CompletedAt = DateTimeOffset.UtcNow;
-                        resumedSession.UpdatedAt = DateTimeOffset.UtcNow;
-                        await ctx.SaveChangesAsync(CancellationToken.None);
-                    }
-
-                    _logger.LogWarning(
-                        "SQL workflow resume not fully implemented. SessionId={SessionId}",
-                        reviewResponse.SessionId);
-                },
-                ex => _errorHandler.HandleWorkflowErrorAsync(
-                    reviewResponse.SessionId,
-                    ex,
-                    currentStep: "sql_workflow_resume",
-                    CancellationToken.None),
-                $"Unhandled exception in background SQL workflow resume task. SessionId={reviewResponse.SessionId}");
-
-            return new WorkflowResumeResponse(
-                SessionId: reviewResponse.SessionId,
-                Status: "running");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "Failed to resume SQL workflow. SessionId={SessionId}",
-                reviewResponse.SessionId);
-            throw;
-        }
+        return ResumeWithReviewResponseAsync(sessionId, reviewResponse, cancellationToken);
     }
 
-    public async Task<WorkflowResumeResponse> ResumeConfigWorkflowAsync(
-        DbConfig.ConfigReviewDecisionResponseMessage reviewResponse,
+    public Task<WorkflowResumeResponse> ResumeConfigWorkflowAsync(
+        Guid sessionId,
+        ExternalResponse reviewResponse,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(reviewResponse);
-
-        _logger.LogInformation(
-            "Resuming Config workflow with review response. SessionId={SessionId}, TaskId={TaskId}, Action={Action}",
-            reviewResponse.SessionId,
-            reviewResponse.TaskId,
-            reviewResponse.Action);
-
-        try
-        {
-            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            var session = await dbContext.WorkflowSessions.FindAsync([reviewResponse.SessionId], cancellationToken);
-
-            if (session is null)
-            {
-                throw new InvalidOperationException($"Session {reviewResponse.SessionId} not found");
-            }
-
-            if (session.Status != "suspended")
-            {
-                throw new InvalidOperationException(
-                    $"Session {reviewResponse.SessionId} is not suspended (current status: {session.Status})");
-            }
-
-            if (reviewResponse.Action == "reject")
-            {
-                session.Status = "failed";
-                session.ErrorMessage = $"Review rejected: {reviewResponse.Comment}";
-                session.CompletedAt = DateTimeOffset.UtcNow;
-            }
-            else
-            {
-                session.Status = "running";
-            }
-
-            session.UpdatedAt = DateTimeOffset.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            if (reviewResponse.Action == "reject")
-            {
-                _logger.LogWarning(
-                    "Config workflow rejected. SessionId={SessionId}, Comment={Comment}",
-                    reviewResponse.SessionId,
-                    reviewResponse.Comment);
-
-                return new WorkflowResumeResponse(
-                    SessionId: reviewResponse.SessionId,
-                    Status: "failed");
-            }
-
-            RunInBackground(
-                async _ =>
-                {
-                    _logger.LogInformation(
-                        "Config workflow resume execution started. SessionId={SessionId}",
-                        reviewResponse.SessionId);
-
-                    await using var ctx = await _dbContextFactory.CreateDbContextAsync(CancellationToken.None);
-                    var resumedSession = await ctx.WorkflowSessions.FindAsync([reviewResponse.SessionId], CancellationToken.None);
-                    if (resumedSession is not null)
-                    {
-                        resumedSession.Status = "completed";
-                        resumedSession.CompletedAt = DateTimeOffset.UtcNow;
-                        resumedSession.UpdatedAt = DateTimeOffset.UtcNow;
-                        await ctx.SaveChangesAsync(CancellationToken.None);
-                    }
-
-                    _logger.LogWarning(
-                        "Config workflow resume not fully implemented. SessionId={SessionId}",
-                        reviewResponse.SessionId);
-                },
-                ex => _errorHandler.HandleWorkflowErrorAsync(
-                    reviewResponse.SessionId,
-                    ex,
-                    currentStep: "config_workflow_resume",
-                    CancellationToken.None),
-                $"Unhandled exception in background Config workflow resume task. SessionId={reviewResponse.SessionId}");
-
-            return new WorkflowResumeResponse(
-                SessionId: reviewResponse.SessionId,
-                Status: "running");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "Failed to resume Config workflow. SessionId={SessionId}",
-                reviewResponse.SessionId);
-            throw;
-        }
+        return ResumeWithReviewResponseAsync(sessionId, reviewResponse, cancellationToken);
     }
 
     public async Task<WorkflowCancelResponse> CancelAsync(
@@ -455,6 +242,198 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
 
             throw;
         }
+    }
+
+    private async Task<WorkflowResumeResponse> ResumeWithReviewResponseAsync(
+        Guid sessionId,
+        ExternalResponse reviewResponse,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(reviewResponse);
+
+        var (session, runState, workflow) = await LoadResumeContextAsync(sessionId, cancellationToken);
+        await UpdateSessionStatusAsync(sessionId, "running", cancellationToken);
+
+        await using var run = await InProcessExecution.ResumeAsync(
+            workflow,
+            new CheckpointInfo(sessionId.ToString(), runState.CheckpointRef),
+            _checkpointManager,
+            cancellationToken);
+
+        try
+        {
+            await run.ResumeAsync([reviewResponse], cancellationToken);
+            var status = await run.GetStatusAsync(cancellationToken);
+            await UpdateSessionAfterResumeAsync(sessionId, runState.RunId, status, null, cancellationToken);
+            return new WorkflowResumeResponse(sessionId, MapResumeStatus(status));
+        }
+        catch (Exception ex)
+        {
+            await MarkSessionFailedAsync(sessionId, runState.RunId, ex, cancellationToken);
+            throw;
+        }
+    }
+
+    private async Task<(WorkflowSessionEntity Session, MafRunState RunState, Workflow Workflow)> LoadResumeContextAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cancellationToken);
+
+        if (session is null)
+        {
+            throw new InvalidOperationException($"Session {sessionId} not found");
+        }
+
+        if (!WaitingStatuses.Any(status => string.Equals(status, session.Status, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException(
+                $"Session {sessionId} is not waiting for review (current status: {session.Status})");
+        }
+
+        var runState = await _runStateStore.GetAsync(sessionId, cancellationToken);
+        if (runState is null)
+        {
+            throw new InvalidOperationException($"Checkpoint for session {sessionId} not found");
+        }
+
+        var workflow = session.WorkflowType switch
+        {
+            "sql_analysis" => _workflowFactory.BuildSqlAnalysisWorkflow(),
+            "db_config_optimization" => _workflowFactory.BuildDbConfigWorkflow(),
+            _ => throw new InvalidOperationException($"Unknown workflow type: {session.WorkflowType}")
+        };
+
+        return (session, runState, workflow);
+    }
+
+    private async Task UpdateSessionStatusAsync(
+        Guid sessionId,
+        string status,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cancellationToken);
+        if (session is null)
+        {
+            return;
+        }
+
+        session.Status = status;
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task UpdateSessionAfterResumeAsync(
+        Guid sessionId,
+        string runId,
+        RunStatus status,
+        Exception? exception,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cancellationToken);
+        if (session is null)
+        {
+            return;
+        }
+
+        switch (status)
+        {
+            case RunStatus.Ended:
+                session.Status = "completed";
+                session.CompletedAt = DateTimeOffset.UtcNow;
+                session.ErrorMessage = null;
+                await _eventPublisher.PublishAsync(
+                    new WorkflowEventMessage(
+                        WorkflowEventType.WorkflowCompleted,
+                        sessionId,
+                        session.WorkflowType,
+                        DateTimeOffset.UtcNow,
+                        new { runId, message = "Workflow completed." }),
+                    cancellationToken);
+                break;
+
+            case RunStatus.PendingRequests:
+            case RunStatus.Idle:
+                session.Status = "suspended";
+                await _eventPublisher.PublishAsync(
+                    new WorkflowEventMessage(
+                        WorkflowEventType.WorkflowWaitingReview,
+                        sessionId,
+                        session.WorkflowType,
+                        DateTimeOffset.UtcNow,
+                        new { runId, message = "Workflow is waiting for review." }),
+                    cancellationToken);
+                break;
+
+            default:
+                session.Status = "failed";
+                session.ErrorMessage = exception?.Message ?? "Workflow resume failed.";
+                session.CompletedAt = DateTimeOffset.UtcNow;
+                await _eventPublisher.PublishAsync(
+                    new WorkflowEventMessage(
+                        WorkflowEventType.WorkflowFailed,
+                        sessionId,
+                        session.WorkflowType,
+                        DateTimeOffset.UtcNow,
+                        new
+                        {
+                            runId,
+                            errorMessage = exception?.Message ?? "Workflow resume failed.",
+                            exceptionType = exception?.GetType().Name
+                        }),
+                    cancellationToken);
+                break;
+        }
+
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task MarkSessionFailedAsync(
+        Guid sessionId,
+        string runId,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cancellationToken);
+        if (session is null)
+        {
+            return;
+        }
+
+        session.Status = "failed";
+        session.ErrorMessage = exception.Message;
+        session.CompletedAt = DateTimeOffset.UtcNow;
+        session.UpdatedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await _eventPublisher.PublishAsync(
+            new WorkflowEventMessage(
+                WorkflowEventType.WorkflowFailed,
+                sessionId,
+                session.WorkflowType,
+                DateTimeOffset.UtcNow,
+                new
+                {
+                    runId,
+                    errorMessage = exception.Message,
+                    exceptionType = exception.GetType().Name
+                }),
+            cancellationToken);
+    }
+
+    private static string MapResumeStatus(RunStatus status)
+    {
+        return status switch
+        {
+            RunStatus.Ended => "completed",
+            RunStatus.PendingRequests or RunStatus.Idle => "suspended",
+            _ => "failed"
+        };
     }
 
     private void RunInBackground(

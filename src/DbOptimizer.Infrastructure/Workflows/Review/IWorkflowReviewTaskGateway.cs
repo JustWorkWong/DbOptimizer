@@ -28,6 +28,13 @@ public interface IWorkflowReviewTaskGateway
         string? adjustmentsJson,
         DateTimeOffset reviewedAt,
         CancellationToken cancellationToken = default);
+
+    Task UpdateCorrelationAsync(
+        Guid taskId,
+        string requestId,
+        string engineRunId,
+        string checkpointRef,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed record ReviewTaskCorrelation(
