@@ -16,6 +16,7 @@
   - [x] 已有 `MafNativeWorkflowInteropTests`
   - [x] 已验证 `PendingRequests -> ExternalResponse -> Ended`
   - [x] 已验证 `CheckpointInfo -> ResumeStreamingAsync -> Ended`
+  - [x] 范围限定：以上仅证明隔离测试中的原生互操作可用，不代表当前业务主链路已切到原生 checkpoint/request-response/resume
 - [x] workflow graph 和 executor 仍然是 MAF 原生构建
   - [x] `MafWorkflowFactory` 继续使用 `WorkflowBuilder`
   - [x] SQL / Config executors 未被推倒重写

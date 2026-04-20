@@ -7,12 +7,13 @@ namespace DbOptimizer.Infrastructure.Maf.Runtime;
 
 /// <summary>
 /// MAF Checkpoint 存储实现
-/// 设计目标：
-/// 1) 集成 MafRunStateStore，复用 PostgreSQL + Redis 存储
-/// 2) 支持 runId 到 sessionId 的映射
-/// 3) 自动保存 checkpoint：executor 执行后、review gate 挂起前、错误发生时
-/// 4) 支持 checkpoint 大小限制和保留策略
-/// 5) 使用 GZip 压缩优化序列化性能
+/// 当前职责：
+/// 1) 提供 checkpoint 数据的压缩/解压与存储适配
+/// 2) 复用 MafRunStateStore 对 PostgreSQL + Redis 的持久化能力
+/// 3) 作为 native checkpointing 重构中的适配层存在
+/// 注意：
+/// - 当前生产主链路尚未统一通过 CheckpointManager 驱动此存储
+/// - “自动保存 checkpoint”的完整生命周期仍属于目标态，而非现状
 /// </summary>
 public sealed class MafCheckpointStore : IMafCheckpointStore
 {

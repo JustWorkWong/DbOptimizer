@@ -10,6 +10,7 @@
   - Added a minimal native MAF interop test that verifies `ExternalRequest -> PendingRequests -> ResumeStreamingAsync -> Ended`.
   - Fixed existing test-project compile drift caused by MAF API changes such as `DescribeProtocolAsync` returning `ValueTask` and the `MafWorkflowRuntime` constructor signature change.
   - The minimal interop tests pass on top of MAF `1.1.0`.
+  - Scope note: `PR-0` / `PR-1` only prove native MAF interop at the isolated test level; they do not mean the production starter/runtime/review API path has already switched to native checkpoint/request-response/resume semantics.
 
 ## 1. 文档目的
 

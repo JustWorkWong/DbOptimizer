@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Moq;
 using DbOptimizer.Infrastructure.Maf.Runtime;
+using System.IO.Compression;
 
 namespace DbOptimizer.Infrastructure.Tests.Maf;
 
@@ -29,6 +30,17 @@ public sealed class MafCheckpointStoreTests
         var runId = $"{sessionId}_20260417120000";
         var checkpointRef = "checkpoint_001";
         var checkpointData = "test checkpoint data"u8.ToArray();
+        string? capturedEngineState = null;
+
+        _runStateStoreMock.Setup(x => x.SaveAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Guid, string, string, string, CancellationToken>(
+                (_, _, _, engineState, _) => capturedEngineState = engineState)
+            .Returns(Task.CompletedTask);
 
         // Act
         await _store.SaveCheckpointAsync(runId, checkpointRef, checkpointData);
@@ -42,6 +54,8 @@ public sealed class MafCheckpointStoreTests
                 It.Is<string>(s => !string.IsNullOrEmpty(s)),
                 It.IsAny<CancellationToken>()),
             Times.Once);
+        Assert.NotNull(capturedEngineState);
+        Assert.Equal(checkpointData, DecodeAndDecompress(capturedEngineState));
     }
 
     [Fact]
@@ -79,7 +93,7 @@ public sealed class MafCheckpointStoreTests
         var runId = $"{sessionId}_20260417120000";
         var checkpointRef = "checkpoint_001";
         var checkpointData = "test checkpoint data"u8.ToArray();
-        var base64Data = Convert.ToBase64String(checkpointData);
+        var base64Data = CompressAndEncode(checkpointData);
 
         var state = new MafRunState(
             sessionId,
@@ -126,7 +140,7 @@ public sealed class MafCheckpointStoreTests
         var runId = $"{sessionId}_20260417120000";
         var checkpointRef = "checkpoint_001";
         var checkpointData = "test"u8.ToArray();
-        var base64Data = Convert.ToBase64String(checkpointData);
+        var base64Data = CompressAndEncode(checkpointData);
 
         var state = new MafRunState(
             sessionId,
@@ -154,7 +168,7 @@ public sealed class MafCheckpointStoreTests
         var runId = $"{sessionId}_20260417120000";
         var checkpointRef = "checkpoint_001";
         var checkpointData = "test"u8.ToArray();
-        var base64Data = Convert.ToBase64String(checkpointData);
+        var base64Data = CompressAndEncode(checkpointData);
 
         var state = new MafRunState(
             sessionId,
@@ -260,5 +274,26 @@ public sealed class MafCheckpointStoreTests
 
         // Assert
         Assert.Null(result);
+    }
+
+    private static string CompressAndEncode(byte[] data)
+    {
+        using var outputStream = new MemoryStream();
+        using (var gzipStream = new GZipStream(outputStream, CompressionLevel.Fastest))
+        {
+            gzipStream.Write(data, 0, data.Length);
+        }
+
+        return Convert.ToBase64String(outputStream.ToArray());
+    }
+
+    private static byte[] DecodeAndDecompress(string encodedData)
+    {
+        var compressedData = Convert.FromBase64String(encodedData);
+        using var inputStream = new MemoryStream(compressedData);
+        using var gzipStream = new GZipStream(inputStream, CompressionMode.Decompress);
+        using var outputStream = new MemoryStream();
+        gzipStream.CopyTo(outputStream);
+        return outputStream.ToArray();
     }
 }
