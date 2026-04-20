@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using DbOptimizer.Infrastructure.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
 using DbOptimizer.Infrastructure.Workflows.Application;
@@ -21,10 +22,10 @@ internal static class WorkflowEventsApiRouteBuilderExtensions
     private static async Task HandleWorkflowEventsAsync(
         Guid sessionId,
         HttpContext httpContext,
-        IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
         IWorkflowApplicationService workflowApplicationService,
         IWorkflowEventQueryService workflowEventQueryService,
         IMafWorkflowEventAdapter mafWorkflowEventAdapter,
+        IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
         CancellationToken cancellationToken)
     {
         try
@@ -50,32 +51,31 @@ internal static class WorkflowEventsApiRouteBuilderExtensions
 
             var lastEventIdHeader = httpContext.Request.Headers["Last-Event-ID"].ToString();
             _ = long.TryParse(lastEventIdHeader, out var lastEventId);
-
-            await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-            var persistedState = await dbContext.WorkflowSessions
-                .AsNoTracking()
-                .Where(item => item.SessionId == sessionId)
-                .Select(item => item.State)
-                .SingleAsync(cancellationToken);
-            var checkpoint = WorkflowCheckpointJson.Deserialize(persistedState);
-            var mafEvents = WorkflowTimeline.GetEvents(checkpoint)
+            var persistedEvents = await LoadPersistedEventsAsync(sessionId, dbContextFactory, cancellationToken);
+            var persistedReplayEvents = persistedEvents
                 .Where(item => item.Sequence > lastEventId)
-                .OrderBy(item => item.Sequence)
                 .ToArray();
+            var replayCutoff = persistedReplayEvents.Length > 0
+                ? persistedReplayEvents[^1].Sequence
+                : lastEventId;
 
-            var businessEvents = mafWorkflowEventAdapter.Map(sessionId, workflow.WorkflowType, mafEvents);
-
-            var highestPersistedSequence = businessEvents.LastOrDefault()?.Sequence ?? lastEventId;
-            foreach (var businessEvent in businessEvents)
+            if (lastEventId <= 0)
             {
-                await WriteBusinessEventAsync(response, businessEvent, cancellationToken);
+                await WriteSnapshotAsync(response, workflow, mafWorkflowEventAdapter, cancellationToken);
             }
 
-            await WriteSnapshotAsync(response, workflow, mafWorkflowEventAdapter, cancellationToken);
-
-            var subscription = workflowEventQueryService.Subscribe(sessionId, highestPersistedSequence);
+            var subscription = workflowEventQueryService.Subscribe(sessionId, replayCutoff);
             try
             {
+                if (persistedReplayEvents.Length > 0)
+                {
+                    var persistedBusinessEvents = mafWorkflowEventAdapter.Map(sessionId, workflow.WorkflowType, persistedReplayEvents);
+                    foreach (var persistedEvent in persistedBusinessEvents)
+                    {
+                        await WriteBusinessEventAsync(response, persistedEvent, cancellationToken);
+                    }
+                }
+
                 var backlogBusinessEvents = mafWorkflowEventAdapter.Map(sessionId, workflow.WorkflowType, subscription.Backlog);
                 foreach (var backlogEvent in backlogBusinessEvents)
                 {
@@ -195,5 +195,26 @@ internal static class WorkflowEventsApiRouteBuilderExtensions
 
         await response.WriteAsync(builder.ToString(), cancellationToken);
         await response.Body.FlushAsync(cancellationToken);
+    }
+
+    private static async Task<IReadOnlyList<WorkflowEventRecord>> LoadPersistedEventsAsync(
+        Guid sessionId,
+        IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
+        CancellationToken cancellationToken)
+    {
+        await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var state = await dbContext.WorkflowSessions
+            .AsNoTracking()
+            .Where(item => item.SessionId == sessionId)
+            .Select(item => item.State)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return GetPersistedEvents(state);
+    }
+
+    private static IReadOnlyList<WorkflowEventRecord> GetPersistedEvents(string? state)
+    {
+        var checkpoint = WorkflowCheckpointJson.Deserialize(state ?? string.Empty);
+        return WorkflowTimeline.GetEvents(checkpoint);
     }
 }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using DbOptimizer.Infrastructure.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
@@ -13,6 +14,7 @@ namespace DbOptimizer.Infrastructure.Tests.Workflows.Projection;
 public sealed class WorkflowProjectionWriterTests : IAsyncLifetime
 {
     private const string DatabaseName = "WorkflowProjectionWriterTests";
+    private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions();
     private readonly DbOptimizerDbContext _dbContext;
     private readonly IDbContextFactory<DbOptimizerDbContext> _dbContextFactory;
     private readonly Mock<IWorkflowResultSerializer> _resultSerializerMock;
@@ -155,7 +157,7 @@ public sealed class WorkflowProjectionWriterTests : IAsyncLifetime
         await using var assertContext = await _dbContextFactory.CreateDbContextAsync();
         var session = await assertContext.WorkflowSessions.FindAsync(sessionId);
         Assert.NotNull(session);
-        Assert.Equal("WaitingReview", session.Status);
+        Assert.Equal("WaitingForReview", session.Status);
     }
 
     [Fact]
@@ -278,18 +280,67 @@ public sealed class WorkflowProjectionWriterTests : IAsyncLifetime
         Assert.NotNull(session.CompletedAt);
     }
 
+    [Fact]
+    public async Task ApplyEventAsync_PersistsTimelineIntoSessionState()
+    {
+        var sessionId = Guid.NewGuid();
+        await CreateTestSessionAsync(sessionId, "Running");
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var workflowEvent = new WorkflowEventRecord(
+            Sequence: 7,
+            EventType: WorkflowEventType.ExecutorCompleted,
+            SessionId: sessionId,
+            WorkflowType: "SqlAnalysis",
+            Timestamp: startedAt,
+            Payload: JsonSerializer.SerializeToElement(new { executorName = "SqlParserMafExecutor" }));
+
+        await _writer.ApplyEventAsync(sessionId, workflowEvent);
+
+        await using var assertContext = await _dbContextFactory.CreateDbContextAsync();
+        var session = await assertContext.WorkflowSessions.FindAsync(sessionId);
+        Assert.NotNull(session);
+
+        var checkpoint = JsonSerializer.Deserialize<WorkflowCheckpoint>(session.State, SerializerOptions);
+        Assert.NotNull(checkpoint);
+
+        var persistedEvents = WorkflowTimeline.GetEvents(checkpoint);
+        Assert.Single(persistedEvents);
+        Assert.Equal(7, persistedEvents[0].Sequence);
+        Assert.Equal(WorkflowEventType.ExecutorCompleted, persistedEvents[0].EventType);
+        Assert.Equal("SqlParserMafExecutor", persistedEvents[0].Payload.GetProperty("executorName").GetString());
+    }
+
     private async Task CreateTestSessionAsync(Guid sessionId, string status)
     {
+        var checkpointStatus = Enum.TryParse<WorkflowCheckpointStatus>(status, ignoreCase: true, out var parsedStatus)
+            ? parsedStatus
+            : WorkflowCheckpointStatus.Running;
+        var now = DateTimeOffset.UtcNow;
         var session = new WorkflowSessionEntity
         {
             SessionId = sessionId,
             WorkflowType = "SqlAnalysis",
             Status = status,
-            State = "{}",
+            State = JsonSerializer.Serialize(
+                new WorkflowCheckpoint
+                {
+                    SessionId = sessionId,
+                    WorkflowType = "SqlAnalysis",
+                    Status = checkpointStatus,
+                    CurrentExecutor = string.Empty,
+                    CheckpointVersion = 1,
+                    Context = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase),
+                    CompletedExecutors = Array.Empty<string>(),
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                    LastCheckpointAt = now
+                },
+                SerializerOptions),
             EngineType = "maf",
             SourceType = "manual",
-            CreatedAt = DateTimeOffset.UtcNow,
-            UpdatedAt = DateTimeOffset.UtcNow
+            CreatedAt = now,
+            UpdatedAt = now
         };
 
         _dbContext.WorkflowSessions.Add(session);
@@ -308,5 +359,12 @@ public sealed class WorkflowProjectionWriterTests : IAsyncLifetime
             WorkflowType: "SqlAnalysis",
             Timestamp: DateTimeOffset.UtcNow,
             Payload: JsonSerializer.SerializeToElement(payload));
+    }
+
+    private static JsonSerializerOptions CreateSerializerOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
     }
 }

@@ -110,7 +110,8 @@ public sealed class ReviewApplicationServiceTests
                     DbContextFactory,
                     NullLogger<WorkflowReviewTaskGateway>.Instance),
                 new StubWorkflowReviewResponseFactory(),
-                new StubMafWorkflowRuntime(DbContextFactory));
+                new StubMafWorkflowRuntime(DbContextFactory),
+                NullLogger<ReviewApplicationService>.Instance);
         }
 
         public static async Task<ReviewServiceHarness> CreateAsync()

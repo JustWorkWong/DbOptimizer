@@ -186,6 +186,9 @@ public sealed class WorkflowApplicationService(
             "completed" => 100,
             "failed" => 100,
             "cancelled" => 100,
+            "waitingforreview" => 85,
+            "waitingreview" => 85,
+            "suspended" => 85,
             "running" => 50,
             "pending" => 10,
             _ => 0

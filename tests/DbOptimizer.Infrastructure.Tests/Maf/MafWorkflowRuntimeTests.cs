@@ -379,13 +379,13 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
         // Assert
         Assert.NotNull(response);
         Assert.Equal(sessionId, response.SessionId);
-        Assert.Equal("suspended", response.Status);
+        Assert.Equal("WaitingForReview", response.Status);
 
         // 验证 session 状态已更新
         await using var verifyContext = new DbOptimizerDbContext(_dbOptions);
         var updatedSession = await verifyContext.WorkflowSessions.FindAsync(sessionId);
         Assert.NotNull(updatedSession);
-        Assert.Equal("suspended", updatedSession.Status);
+        Assert.Equal("WaitingForReview", updatedSession.Status);
     }
 
     [Fact]
@@ -600,7 +600,7 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
         {
             var session = await dbContext.WorkflowSessions.FindAsync(sessionId);
             Assert.NotNull(session);
-            Assert.Equal("cancelled", session.Status);
+            Assert.Equal("Cancelled", session.Status);
             Assert.NotNull(session.CompletedAt);
         }
 
