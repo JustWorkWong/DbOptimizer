@@ -17,6 +17,9 @@ using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using Microsoft.Agents.AI.Workflows;
+using Microsoft.Agents.AI.Workflows.Checkpointing;
+using System.Text.Json;
 
 if (LocalDatabaseMcpServer.TryParse(args, out var localMcpEngine))
 {
@@ -192,6 +195,9 @@ builder.Services.AddSingleton(slowQueryCollectionOptions);
 builder.Services.AddSingleton(mafWorkflowRuntimeOptions);
 builder.Services.AddSingleton<IMafWorkflowFactory, MafWorkflowFactory>();
 builder.Services.AddSingleton<IMafExecutorInstrumentation, MafExecutorInstrumentation>();
+builder.Services.AddSingleton<ICheckpointStore<JsonElement>, MafJsonCheckpointStore>();
+builder.Services.AddSingleton<CheckpointManager>(serviceProvider =>
+    CheckpointManager.CreateJson(serviceProvider.GetRequiredService<ICheckpointStore<JsonElement>>()));
 builder.Services.AddSingleton<IMafWorkflowRuntime, MafWorkflowRuntime>();
 builder.Services.AddSingleton<IMafRunStateStore, MafRunStateStore>();
 builder.Services.AddSingleton<IMafCheckpointStore, MafCheckpointStore>();

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Agents.AI.Workflows.InProc;
+using Microsoft.Agents.AI.Workflows.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
 using DbOptimizer.Infrastructure.Maf.Runtime.ErrorHandling;
@@ -21,11 +22,13 @@ internal sealed class MafSqlWorkflowStarter
     private readonly IWorkflowEventPublisher _eventPublisher;
     private readonly MafGlobalErrorHandler _errorHandler;
     private readonly RetryPolicy _retryPolicy;
+    private readonly CheckpointManager _checkpointManager;
 
     public MafSqlWorkflowStarter(
         IMafWorkflowFactory workflowFactory,
         IMafRunStateStore runStateStore,
         IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
+        CheckpointManager checkpointManager,
         ILoggerFactory loggerFactory,
         IWorkflowEventPublisher eventPublisher,
         MafGlobalErrorHandler errorHandler,
@@ -34,6 +37,7 @@ internal sealed class MafSqlWorkflowStarter
         _workflowFactory = workflowFactory;
         _runStateStore = runStateStore;
         _dbContextFactory = dbContextFactory;
+        _checkpointManager = checkpointManager;
         _logger = loggerFactory.CreateLogger<MafSqlWorkflowStarter>();
         _eventPublisher = eventPublisher;
         _errorHandler = errorHandler;
@@ -224,6 +228,7 @@ internal sealed class MafSqlWorkflowStarter
             var run = await InProcessExecution.RunAsync(
                 workflow,
                 command,
+                _checkpointManager,
                 sessionId.ToString(),
                 cancellationToken);
 

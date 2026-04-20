@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Agents.AI.Workflows.InProc;
+using Microsoft.Agents.AI.Workflows.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
 using DbOptimizer.Infrastructure.Maf.DbConfig;
@@ -30,11 +31,13 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
     private readonly CircuitBreaker _databaseCircuitBreaker;
     private readonly MafSqlWorkflowStarter _sqlStarter;
     private readonly MafConfigWorkflowStarter _configStarter;
+    private readonly CheckpointManager _checkpointManager;
 
     public MafWorkflowRuntime(
         IMafWorkflowFactory workflowFactory,
         IMafRunStateStore runStateStore,
         IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
+        CheckpointManager checkpointManager,
         MafWorkflowRuntimeOptions options,
         ILoggerFactory loggerFactory,
         IWorkflowEventPublisher eventPublisher)
@@ -42,6 +45,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
         _workflowFactory = workflowFactory ?? throw new ArgumentNullException(nameof(workflowFactory));
         _runStateStore = runStateStore ?? throw new ArgumentNullException(nameof(runStateStore));
         _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
+        _checkpointManager = checkpointManager ?? throw new ArgumentNullException(nameof(checkpointManager));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
         _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
@@ -77,6 +81,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             _workflowFactory,
             _runStateStore,
             _dbContextFactory,
+            _checkpointManager,
             _loggerFactory,
             _eventPublisher,
             _errorHandler,
@@ -86,6 +91,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             _workflowFactory,
             _runStateStore,
             _dbContextFactory,
+            _checkpointManager,
             _loggerFactory,
             _eventPublisher,
             _errorHandler,
