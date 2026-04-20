@@ -20,11 +20,6 @@ public interface IExecutionPlanProvider
         CancellationToken cancellationToken = default);
 }
 
-/* =========================
- * ExecutionPlan 获取器
- * 先走 MCP explain，失败后按配置决定是否降级为数据库直连 explain。
- * 这里优先保证 M3-03 功能闭环，后续如果要和 AgentRuntime 共用基础设施可以再抽公共层。
- * ========================= */
 public sealed class ExecutionPlanProvider(
     IConfiguration configuration,
     ExecutionPlanOptions executionPlanOptions,
@@ -43,13 +38,17 @@ public sealed class ExecutionPlanProvider(
         Exception? lastException = null;
         string? diagnosticTag = null;
 
-        if (serverOptions.Enabled)
+        if (!serverOptions.Enabled)
+        {
+            diagnosticTag = "mcp_disabled";
+        }
+        else
         {
             for (var attempt = 1; attempt <= executionPlanOptions.RetryCount + 1; attempt++)
             {
                 try
                 {
-                    return await InvokeMcpAsync(serverOptions, sqlText, attempt, cancellationToken);
+                    return await InvokeMcpAsync(serverOptions, databaseEngine, sqlText, attempt, cancellationToken);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -62,7 +61,7 @@ public sealed class ExecutionPlanProvider(
 
                     logger.LogWarning(
                         ex,
-                        "Execution plan MCP 调用失败。DatabaseEngine={DatabaseEngine}, Attempt={Attempt}/{MaxAttempts}",
+                        "Execution plan MCP call failed. DatabaseEngine={DatabaseEngine}, Attempt={Attempt}/{MaxAttempts}",
                         databaseEngine,
                         attempt,
                         executionPlanOptions.RetryCount + 1);
@@ -75,15 +74,11 @@ public sealed class ExecutionPlanProvider(
                 }
             }
         }
-        else
-        {
-            diagnosticTag = "mcp_disabled";
-        }
 
         if (!executionPlanOptions.EnableDirectDbFallback)
         {
             throw new InvalidOperationException(
-                $"Execution plan MCP 调用失败，且未开启直连降级。DatabaseEngine={databaseEngine}",
+                $"Execution plan MCP call failed. DatabaseEngine={databaseEngine}",
                 lastException);
         }
 
@@ -93,10 +88,43 @@ public sealed class ExecutionPlanProvider(
             executionPlanOptions.RetryCount + 1,
             diagnosticTag ?? "mcp_failure",
             cancellationToken);
+
+    }
+
+    private async Task<ExecutionPlanInvocationResult> ExecuteFallbackAsync(
+        DatabaseOptimizationEngine databaseEngine,
+        string sqlText,
+        int attemptCount,
+        string diagnosticTag,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var rawText = databaseEngine switch
+        {
+            DatabaseOptimizationEngine.PostgreSql => await ExplainPostgreSqlAsync(sqlText, cancellationToken),
+            DatabaseOptimizationEngine.MySql => await ExplainMySqlAsync(sqlText, cancellationToken),
+            _ => throw new InvalidOperationException("Unknown database engine for execution plan fallback.")
+        };
+
+        logger.LogWarning(
+            "Execution plan direct fallback executed. DatabaseEngine={DatabaseEngine}, DiagnosticTag={DiagnosticTag}",
+            databaseEngine,
+            diagnosticTag);
+
+        return new ExecutionPlanInvocationResult
+        {
+            ToolName = "explain",
+            RawText = rawText,
+            UsedFallback = true,
+            AttemptCount = attemptCount,
+            DiagnosticTag = diagnosticTag,
+            ElapsedMs = stopwatch.ElapsedMilliseconds
+        };
     }
 
     private async Task<ExecutionPlanInvocationResult> InvokeMcpAsync(
         ExecutionPlanMcpServerOptions serverOptions,
+        DatabaseOptimizationEngine databaseEngine,
         string sqlText,
         int attemptCount,
         CancellationToken cancellationToken)
@@ -107,15 +135,27 @@ public sealed class ExecutionPlanProvider(
 
         if (!serverOptions.Transport.Equals("stdio", StringComparison.OrdinalIgnoreCase))
         {
-            throw new NotSupportedException($"暂不支持 MCP transport: {serverOptions.Transport}");
+            throw new NotSupportedException($"Unsupported MCP transport: {serverOptions.Transport}");
         }
 
         var transport = new StdioClientTransport(new StdioClientTransportOptions
         {
             Name = "DbOptimizer ExecutionPlan MCP Client",
             Command = serverOptions.Command,
-            Arguments = ParseArguments(serverOptions.Arguments)
+            Arguments = ParseArguments(serverOptions.Arguments),
+            EnvironmentVariables = new Dictionary<string, string?>
+            {
+                ["DATABASE_URL"] = ResolveConnectionString(databaseEngine)
+            }
         });
+
+        logger.LogInformation(
+            "Starting execution plan MCP call. DatabaseEngine={DatabaseEngine}, Attempt={Attempt}, Command={Command}, Arguments={Arguments}, SqlPreview={SqlPreview}",
+            databaseEngine,
+            attemptCount,
+            serverOptions.Command,
+            serverOptions.Arguments,
+            BuildSqlPreview(sqlText));
 
         await using var client = await McpClient.CreateAsync(transport);
         var tools = await client.ListToolsAsync(cancellationToken: linkedCts.Token);
@@ -141,7 +181,7 @@ public sealed class ExecutionPlanProvider(
 
         if (result.IsError == true)
         {
-            throw new InvalidOperationException($"MCP explain 返回错误：{rawText}");
+            throw new InvalidOperationException($"MCP explain returned an error: {rawText}");
         }
 
         return new ExecutionPlanInvocationResult
@@ -149,37 +189,6 @@ public sealed class ExecutionPlanProvider(
             ToolName = toolName,
             RawText = rawText,
             AttemptCount = attemptCount,
-            ElapsedMs = stopwatch.ElapsedMilliseconds
-        };
-    }
-
-    private async Task<ExecutionPlanInvocationResult> ExecuteFallbackAsync(
-        DatabaseOptimizationEngine databaseEngine,
-        string sqlText,
-        int attemptCount,
-        string diagnosticTag,
-        CancellationToken cancellationToken)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var rawText = databaseEngine switch
-        {
-            DatabaseOptimizationEngine.PostgreSql => await ExplainPostgreSqlAsync(sqlText, cancellationToken),
-            DatabaseOptimizationEngine.MySql => await ExplainMySqlAsync(sqlText, cancellationToken),
-            _ => throw new InvalidOperationException("Unknown database engine for execution plan fallback.")
-        };
-
-        logger.LogWarning(
-            "Execution plan 走数据库直连降级。DatabaseEngine={DatabaseEngine}, DiagnosticTag={DiagnosticTag}",
-            databaseEngine,
-            diagnosticTag);
-
-        return new ExecutionPlanInvocationResult
-        {
-            ToolName = "explain",
-            RawText = rawText,
-            UsedFallback = true,
-            AttemptCount = attemptCount,
-            DiagnosticTag = diagnosticTag,
             ElapsedMs = stopwatch.ElapsedMilliseconds
         };
     }
@@ -291,6 +300,16 @@ public sealed class ExecutionPlanProvider(
         throw new InvalidOperationException("Missing MySQL connection string for execution plan explain.");
     }
 
+    private string ResolveConnectionString(DatabaseOptimizationEngine databaseEngine)
+    {
+        return databaseEngine switch
+        {
+            DatabaseOptimizationEngine.PostgreSql => ResolvePostgreSqlConnectionString(),
+            DatabaseOptimizationEngine.MySql => ResolveMySqlConnectionString(),
+            _ => throw new InvalidOperationException("Unknown database engine for execution plan connection.")
+        };
+    }
+
     private static string ResolveExplainToolName(IEnumerable<string> toolNames)
     {
         var availableTools = toolNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -302,7 +321,8 @@ public sealed class ExecutionPlanProvider(
             }
         }
 
-        throw new InvalidOperationException($"No explain tool alias matched. Available tools: {string.Join(", ", availableTools.OrderBy(name => name))}");
+        throw new InvalidOperationException(
+            $"No explain tool alias matched. Available tools: {string.Join(", ", availableTools.OrderBy(name => name))}");
     }
 
     private static string[] ParseArguments(string rawArguments)
@@ -346,5 +366,12 @@ public sealed class ExecutionPlanProvider(
 
         arguments.Add(current.ToString());
         current.Clear();
+    }
+
+    private static string BuildSqlPreview(string sqlText)
+    {
+        const int maxLength = 160;
+        var singleLine = sqlText.ReplaceLineEndings(" ").Trim();
+        return singleLine.Length <= maxLength ? singleLine : $"{singleLine[..maxLength]}...";
     }
 }

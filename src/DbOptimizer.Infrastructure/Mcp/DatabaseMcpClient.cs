@@ -6,17 +6,11 @@ using ModelContextProtocol.Client;
 
 namespace DbOptimizer.Infrastructure.Mcp;
 
-/* =========================
- * 数据库 MCP 客户端
- * 设计目标：
- * 1) 统一封装 MySQL / PostgreSQL 的 MCP 调用入口
- * 2) 兼容文档中工具命名不完全一致的情况，通过别名自动匹配真实工具名
- * 3) 为 M2-02 的超时 / 重试 / 降级预留稳定包裹点
- * ========================= */
 public class DatabaseMcpClient(
     DatabaseEngine databaseEngine,
     McpServerOptions serverOptions,
     McpOptions mcpOptions,
+    McpFallbackOptions fallbackOptions,
     IDatabaseMcpFallbackExecutor fallbackExecutor,
     ILogger<DatabaseMcpClient> logger) : IDatabaseMcpClient, IAsyncDisposable
 {
@@ -30,6 +24,7 @@ public class DatabaseMcpClient(
 
     private readonly SemaphoreSlim _clientLock = new(1, 1);
     private readonly ConcurrentDictionary<McpToolKind, string> _resolvedTools = new();
+    private readonly IDatabaseMcpFallbackExecutor _fallbackExecutor = fallbackExecutor;
     private McpClient? _client;
 
     public DatabaseEngine DatabaseEngine => databaseEngine;
@@ -113,7 +108,7 @@ public class DatabaseMcpClient(
         {
             if (!mcpOptions.EnableDirectDbFallback)
             {
-                throw new InvalidOperationException($"MCP client for {databaseEngine} is disabled and direct fallback is disabled.");
+                throw new InvalidOperationException($"MCP client for {databaseEngine} is disabled.");
             }
 
             return await ExecuteFallbackAsync(
@@ -220,7 +215,7 @@ public class DatabaseMcpClient(
         if (!mcpOptions.EnableDirectDbFallback)
         {
             throw new InvalidOperationException(
-                $"MCP call failed for {databaseEngine}/{toolKind} and direct fallback is disabled.",
+                $"MCP call failed for {databaseEngine}/{toolKind}. Direct fallback is disabled.",
                 lastException);
         }
 
@@ -268,8 +263,22 @@ public class DatabaseMcpClient(
         {
             Name = $"{databaseEngine} MCP Client",
             Command = serverOptions.Command,
-            Arguments = ParseArguments(serverOptions.Arguments)
+            Arguments = ParseArguments(serverOptions.Arguments),
+            EnvironmentVariables = new Dictionary<string, string?>
+            {
+                ["DATABASE_URL"] = ResolveConnectionString()
+            }
         });
+    }
+
+    private string ResolveConnectionString()
+    {
+        return databaseEngine switch
+        {
+            DatabaseEngine.MySql => fallbackOptions.MySqlConnectionString,
+            DatabaseEngine.PostgreSql => fallbackOptions.PostgreSqlConnectionString,
+            _ => throw new InvalidOperationException($"Unsupported database engine for MCP transport: {databaseEngine}.")
+        };
     }
 
     private async Task<string> ResolveToolNameAsync(McpClient client, McpToolKind toolKind, CancellationToken cancellationToken)
@@ -315,7 +324,7 @@ public class DatabaseMcpClient(
         string diagnosticTag,
         CancellationToken cancellationToken)
     {
-        var fallbackResult = await fallbackExecutor.ExecuteAsync(
+        var fallbackResult = await _fallbackExecutor.ExecuteAsync(
             databaseEngine,
             toolKind,
             arguments,

@@ -12,7 +12,7 @@ public sealed record McpOptions
 
     public int RetryDelayMilliseconds { get; init; } = 1_000;
 
-    public bool EnableDirectDbFallback { get; init; } = true;
+    public bool EnableDirectDbFallback { get; init; } = false;
 
     public bool EnableAuditLogging { get; init; } = true;
 }

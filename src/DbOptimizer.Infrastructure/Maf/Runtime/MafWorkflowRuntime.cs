@@ -8,6 +8,7 @@ using DbOptimizer.Infrastructure.Maf.DbConfig;
 using DbOptimizer.Infrastructure.Maf.SqlAnalysis.Executors;
 using DbOptimizer.Infrastructure.Maf.DbConfig.Executors;
 using DbOptimizer.Infrastructure.Maf.Runtime.ErrorHandling;
+using DbOptimizer.Infrastructure.Workflows;
 
 namespace DbOptimizer.Infrastructure.Maf.Runtime;
 
@@ -22,6 +23,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
     private readonly MafWorkflowRuntimeOptions _options;
     private readonly ILogger<MafWorkflowRuntime> _logger;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly IWorkflowEventPublisher _eventPublisher;
     private readonly MafGlobalErrorHandler _errorHandler;
     private readonly RetryPolicy _retryPolicy;
     private readonly CircuitBreaker _mcpCircuitBreaker;
@@ -34,13 +36,15 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
         IMafRunStateStore runStateStore,
         IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
         MafWorkflowRuntimeOptions options,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        IWorkflowEventPublisher eventPublisher)
     {
         _workflowFactory = workflowFactory ?? throw new ArgumentNullException(nameof(workflowFactory));
         _runStateStore = runStateStore ?? throw new ArgumentNullException(nameof(runStateStore));
         _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
+        _eventPublisher = eventPublisher ?? throw new ArgumentNullException(nameof(eventPublisher));
         _logger = loggerFactory.CreateLogger<MafWorkflowRuntime>();
 
         // 初始化错误处理组件
@@ -74,6 +78,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             _runStateStore,
             _dbContextFactory,
             _loggerFactory,
+            _eventPublisher,
             _errorHandler,
             _retryPolicy);
 
@@ -82,6 +87,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             _runStateStore,
             _dbContextFactory,
             _loggerFactory,
+            _eventPublisher,
             _errorHandler,
             _retryPolicy);
     }

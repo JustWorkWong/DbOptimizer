@@ -8,7 +8,7 @@ const emit = defineEmits<{
 
 const databaseId = ref('mysql-local')
 const databaseType = ref<'mysql' | 'postgresql'>('mysql')
-const allowFallbackSnapshot = ref(true)
+const allowFallbackSnapshot = ref(false)
 const requireHumanReview = ref(true)
 const submitting = ref(false)
 
@@ -32,7 +32,7 @@ function handleSubmit() {
 function reset() {
   databaseId.value = 'mysql-local'
   databaseType.value = 'mysql'
-  allowFallbackSnapshot.value = true
+  allowFallbackSnapshot.value = false
   requireHumanReview.value = true
 }
 

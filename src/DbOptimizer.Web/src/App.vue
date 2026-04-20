@@ -64,7 +64,9 @@ const historyPageSize = ref(12)
 const historyTotal = ref(0)
 const historyStatusFilter = ref('')
 const historyTypeFilter = ref('')
-const sqlText = ref('SELECT * FROM users WHERE age > 18 ORDER BY created_at DESC;')
+const mysqlExampleSql = 'SELECT o.order_id, o.order_no, o.status, o.total_amount, o.created_at FROM orders o WHERE o.status = \'paid\' ORDER BY o.created_at DESC LIMIT 50;'
+const postgreSqlExampleSql = 'SELECT u.user_id, u.username, u.email, u.status, u.created_at FROM users u WHERE u.status = \'active\' ORDER BY u.created_at DESC LIMIT 50;'
+const sqlText = ref(mysqlExampleSql)
 const sqlDatabaseId = ref('mysql-local')
 const sqlDatabaseEngine = ref<'mysql' | 'postgresql'>('mysql')
 const sqlSessionId = ref('')
@@ -206,6 +208,23 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   closeEventSource()
   stopReplay()
+})
+
+watch(sqlDatabaseEngine, (engine, previousEngine) => {
+  if (!previousEngine) {
+    return
+  }
+
+  const previousExample = previousEngine === 'postgresql' ? postgreSqlExampleSql : mysqlExampleSql
+  if (sqlText.value === previousExample || !sqlText.value.trim()) {
+    sqlText.value = engine === 'postgresql' ? postgreSqlExampleSql : mysqlExampleSql
+  }
+
+  sqlDatabaseId.value = engine === 'postgresql' ? 'postgres-local' : 'mysql-local'
+})
+
+watch(dbConfigDatabaseType, (databaseType) => {
+  dbConfigDatabaseId.value = databaseType === 'postgresql' ? 'postgres-local' : 'mysql-local'
 })
 
 watch(selectedTaskId, async (taskId) => {
@@ -467,7 +486,7 @@ async function startDbConfigOptimization() {
       databaseId: dbConfigDatabaseId.value.trim(),
       databaseType: dbConfigDatabaseType.value,
       options: {
-        allowFallbackSnapshot: true,
+        allowFallbackSnapshot: false,
         requireHumanReview: true,
       },
     }
@@ -566,7 +585,7 @@ function clearSql() {
 }
 
 function loadSqlExample() {
-  sqlText.value = 'SELECT * FROM users WHERE age > 18 ORDER BY created_at DESC;'
+  sqlText.value = mysqlExampleSql
   sqlDatabaseId.value = 'mysql-local'
   sqlDatabaseEngine.value = 'mysql'
 }
@@ -1243,7 +1262,7 @@ function getErrorText(error: unknown) {
           <textarea
             v-model="sqlText"
             rows="12"
-            placeholder="输入要分析的 SQL，例如 SELECT * FROM users WHERE age > 18 ORDER BY created_at DESC;"
+            placeholder="输入要分析的 SQL，例如 MySQL 用 orders，PostgreSQL 用 users。"
           />
         </label>
 

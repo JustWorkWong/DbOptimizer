@@ -18,12 +18,14 @@ public sealed class McpClientFactory(IServiceProvider serviceProvider) : IMcpCli
 
 public sealed class MySqlMcpClient(
     McpOptions mcpOptions,
+    McpFallbackOptions fallbackOptions,
     IDatabaseMcpFallbackExecutor fallbackExecutor,
     ILogger<DatabaseMcpClient> logger)
-    : DatabaseMcpClient(DatabaseEngine.MySql, mcpOptions.MySql, mcpOptions, fallbackExecutor, logger);
+    : DatabaseMcpClient(DatabaseEngine.MySql, mcpOptions.MySql, mcpOptions, fallbackOptions, fallbackExecutor, logger);
 
 public sealed class PostgreSqlMcpClient(
     McpOptions mcpOptions,
+    McpFallbackOptions fallbackOptions,
     IDatabaseMcpFallbackExecutor fallbackExecutor,
     ILogger<DatabaseMcpClient> logger)
-    : DatabaseMcpClient(DatabaseEngine.PostgreSql, mcpOptions.PostgreSql, mcpOptions, fallbackExecutor, logger);
+    : DatabaseMcpClient(DatabaseEngine.PostgreSql, mcpOptions.PostgreSql, mcpOptions, fallbackOptions, fallbackExecutor, logger);

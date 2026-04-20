@@ -62,6 +62,65 @@ export interface SlowQueryDetail extends SlowQueryListItem {
   }>
 }
 
+interface SlowQueryTrendApiResponse {
+  databaseId: string
+  days: number
+  points: Array<{
+    date: string
+    slowQueryCount: number
+    avgExecutionTimeMs: number
+    analysisTriggeredCount: number
+  }>
+}
+
+interface SlowQueryAlertApiResponse {
+  items: Array<{
+    alertId: string
+    queryId: string
+    databaseId: string
+    severity: string
+    title: string
+    status: string
+    createdAt: string
+  }>
+}
+
+interface SlowQueryListApiItem {
+  queryId: string
+  databaseId: string
+  databaseType: string
+  queryHash: string
+  sqlFingerprint: string
+  avgExecutionTimeMs: number
+  executionCount: number
+  lastSeenAt: string
+  latestAnalysisSessionId: string | null
+}
+
+interface SlowQueryListApiResponse {
+  items: SlowQueryListApiItem[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+interface SlowQueryDetailApiResponse extends SlowQueryListApiItem {
+  originalSql: string
+  queryType: string
+  tables: string[]
+  maxExecutionTimeMs: number
+  totalRowsExamined: number
+  totalRowsSent: number
+  firstSeenAt: string
+  latestAnalysis: {
+    sessionId: string
+    status: string
+    startedAt: string
+    completedAt: string | null
+    resultType: string | null
+  } | null
+}
+
 export interface ReviewListItem {
   taskId: string
   sessionId: string
@@ -287,6 +346,46 @@ async function fetchEnvelope<T>(path: string, init?: RequestInit): Promise<T> {
   return envelope.data
 }
 
+function mapSlowQueryTrendItem(item: SlowQueryTrendApiResponse['points'][number]): SlowQueryTrendItem {
+  return {
+    date: item.date,
+    count: item.slowQueryCount,
+    avgDuration: item.avgExecutionTimeMs,
+  }
+}
+
+function mapSlowQueryListItem(item: SlowQueryListApiItem): SlowQueryListItem {
+  return {
+    queryId: item.queryId,
+    databaseId: item.databaseId,
+    sqlText: item.sqlFingerprint,
+    avgDuration: item.avgExecutionTimeMs,
+    maxDuration: item.avgExecutionTimeMs,
+    executionCount: item.executionCount,
+    lastSeenAt: item.lastSeenAt,
+    latestAnalysisSessionId: item.latestAnalysisSessionId,
+  }
+}
+
+function mapSlowQueryDetail(detail: SlowQueryDetailApiResponse): SlowQueryDetail {
+  return {
+    ...mapSlowQueryListItem(detail),
+    sqlText: detail.originalSql,
+    maxDuration: detail.maxExecutionTimeMs,
+    firstSeenAt: detail.firstSeenAt,
+    affectedTables: detail.tables,
+    analysisHistory: detail.latestAnalysis
+      ? [
+          {
+            sessionId: detail.latestAnalysis.sessionId,
+            analyzedAt: detail.latestAnalysis.startedAt,
+            status: detail.latestAnalysis.status,
+          },
+        ]
+      : [],
+  }
+}
+
 export function getDashboardStats() {
   return fetchEnvelope<DashboardStats>('/api/dashboard/stats')
 }
@@ -368,7 +467,9 @@ export function getSlowQueryTrends(params: { databaseId: string; days?: number }
   query.set('databaseId', params.databaseId)
   if (params.days) query.set('days', `${params.days}`)
 
-  return fetchEnvelope<SlowQueryTrendItem[]>(`/api/dashboard/slow-query-trends?${query.toString()}`)
+  return fetchEnvelope<SlowQueryTrendApiResponse>(`/api/dashboard/slow-query-trends?${query.toString()}`).then(
+    (response) => response.points.map(mapSlowQueryTrendItem),
+  )
 }
 
 export function getSlowQueryAlerts(params?: { databaseId?: string; status?: string }) {
@@ -377,7 +478,17 @@ export function getSlowQueryAlerts(params?: { databaseId?: string; status?: stri
   if (params?.status) query.set('status', params.status)
 
   const suffix = query.toString() ? `?${query.toString()}` : ''
-  return fetchEnvelope<SlowQueryAlert[]>(`/api/dashboard/slow-query-alerts${suffix}`)
+  return fetchEnvelope<SlowQueryAlertApiResponse>(`/api/dashboard/slow-query-alerts${suffix}`).then((response) =>
+    response.items.map((item) => ({
+      alertId: item.alertId,
+      queryId: item.queryId,
+      databaseId: item.databaseId,
+      severity: item.severity,
+      message: item.title,
+      createdAt: item.createdAt,
+      status: item.status,
+    })),
+  )
 }
 
 export function getSlowQueries(params?: {
@@ -391,12 +502,12 @@ export function getSlowQueries(params?: {
   if (params?.pageSize) query.set('pageSize', `${params.pageSize}`)
 
   const suffix = query.toString() ? `?${query.toString()}` : ''
-  return fetchEnvelope<{
-    items: SlowQueryListItem[]
-    total: number
-    page: number
-    pageSize: number
-  }>(`/api/slow-queries${suffix}`)
+  return fetchEnvelope<SlowQueryListApiResponse>(`/api/slow-queries${suffix}`).then((response) => ({
+    items: response.items.map(mapSlowQueryListItem),
+    total: response.total,
+    page: response.page,
+    pageSize: response.pageSize,
+  }))
 }
 
 export interface PromptVersionDto {
@@ -430,7 +541,7 @@ export interface RollbackPromptVersionRequest {
 }
 
 export function getSlowQueryDetail(queryId: string) {
-  return fetchEnvelope<SlowQueryDetail>(`/api/slow-queries/${queryId}`)
+  return fetchEnvelope<SlowQueryDetailApiResponse>(`/api/slow-queries/${queryId}`).then(mapSlowQueryDetail)
 }
 
 export function listPromptVersions(agentName?: string, page = 1, pageSize = 20) {

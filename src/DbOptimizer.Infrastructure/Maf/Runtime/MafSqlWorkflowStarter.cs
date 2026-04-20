@@ -5,6 +5,7 @@ using Microsoft.Agents.AI.Workflows.InProc;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
 using DbOptimizer.Infrastructure.Maf.Runtime.ErrorHandling;
+using DbOptimizer.Infrastructure.Workflows;
 
 namespace DbOptimizer.Infrastructure.Maf.Runtime;
 
@@ -17,6 +18,7 @@ internal sealed class MafSqlWorkflowStarter
     private readonly IMafRunStateStore _runStateStore;
     private readonly IDbContextFactory<DbOptimizerDbContext> _dbContextFactory;
     private readonly ILogger<MafSqlWorkflowStarter> _logger;
+    private readonly IWorkflowEventPublisher _eventPublisher;
     private readonly MafGlobalErrorHandler _errorHandler;
     private readonly RetryPolicy _retryPolicy;
 
@@ -25,6 +27,7 @@ internal sealed class MafSqlWorkflowStarter
         IMafRunStateStore runStateStore,
         IDbContextFactory<DbOptimizerDbContext> dbContextFactory,
         ILoggerFactory loggerFactory,
+        IWorkflowEventPublisher eventPublisher,
         MafGlobalErrorHandler errorHandler,
         RetryPolicy retryPolicy)
     {
@@ -32,6 +35,7 @@ internal sealed class MafSqlWorkflowStarter
         _runStateStore = runStateStore;
         _dbContextFactory = dbContextFactory;
         _logger = loggerFactory.CreateLogger<MafSqlWorkflowStarter>();
+        _eventPublisher = eventPublisher;
         _errorHandler = errorHandler;
         _retryPolicy = retryPolicy;
     }
@@ -74,6 +78,21 @@ internal sealed class MafSqlWorkflowStarter
 
             // 4. 生成 runId
             var runId = $"maf_run_{Guid.NewGuid():N}";
+
+            await _eventPublisher.PublishAsync(
+                new WorkflowEventMessage(
+                    WorkflowEventType.WorkflowStarted,
+                    command.SessionId,
+                    "sql_analysis",
+                    DateTimeOffset.UtcNow,
+                    new
+                    {
+                        runId,
+                        command.DatabaseType,
+                        sqlLength = command.SqlText.Length,
+                        sqlPreview = BuildSqlPreview(command.SqlText)
+                    }),
+                cancellationToken);
 
             // 5. 保存 MAF run state（初始状态）
             await _runStateStore.SaveAsync(
@@ -224,6 +243,14 @@ internal sealed class MafSqlWorkflowStarter
                     _logger.LogInformation(
                         "SQL workflow completed successfully. SessionId={SessionId}",
                         sessionId);
+                    await _eventPublisher.PublishAsync(
+                        new WorkflowEventMessage(
+                            WorkflowEventType.WorkflowCompleted,
+                            sessionId,
+                            "sql_analysis",
+                            DateTimeOffset.UtcNow,
+                            new { runId, message = "SQL workflow completed." }),
+                        cancellationToken);
                 }
                 else if (status == RunStatus.PendingRequests || status == RunStatus.Idle)
                 {
@@ -231,6 +258,14 @@ internal sealed class MafSqlWorkflowStarter
                     _logger.LogInformation(
                         "SQL workflow suspended for review. SessionId={SessionId}",
                         sessionId);
+                    await _eventPublisher.PublishAsync(
+                        new WorkflowEventMessage(
+                            WorkflowEventType.WorkflowWaitingReview,
+                            sessionId,
+                            "sql_analysis",
+                            DateTimeOffset.UtcNow,
+                            new { runId, message = "SQL workflow is waiting for review." }),
+                        cancellationToken);
                 }
 
                 session.UpdatedAt = DateTimeOffset.UtcNow;
@@ -253,6 +288,15 @@ internal sealed class MafSqlWorkflowStarter
                 session.UpdatedAt = DateTimeOffset.UtcNow;
                 await dbContext.SaveChangesAsync(cancellationToken);
             }
+
+            await _eventPublisher.PublishAsync(
+                new WorkflowEventMessage(
+                    WorkflowEventType.WorkflowWaitingReview,
+                    sessionId,
+                    "sql_analysis",
+                    DateTimeOffset.UtcNow,
+                    new { runId, message = ex.Message }),
+                cancellationToken);
         }
         catch (Exception ex)
         {
@@ -272,7 +316,28 @@ internal sealed class MafSqlWorkflowStarter
                 await dbContext.SaveChangesAsync(cancellationToken);
             }
 
+            await _eventPublisher.PublishAsync(
+                new WorkflowEventMessage(
+                    WorkflowEventType.WorkflowFailed,
+                    sessionId,
+                    "sql_analysis",
+                    DateTimeOffset.UtcNow,
+                    new
+                    {
+                        runId,
+                        errorMessage = ex.Message,
+                        exceptionType = ex.GetType().Name
+                    }),
+                cancellationToken);
+
             throw;
         }
+    }
+
+    private static string BuildSqlPreview(string sqlText)
+    {
+        const int maxLength = 160;
+        var singleLine = sqlText.ReplaceLineEndings(" ").Trim();
+        return singleLine.Length <= maxLength ? singleLine : $"{singleLine[..maxLength]}...";
     }
 }

@@ -4,6 +4,7 @@ using Moq;
 using DbOptimizer.Infrastructure.Maf.Runtime;
 using DbOptimizer.Infrastructure.Persistence;
 using Microsoft.Agents.AI.Workflows;
+using DbOptimizer.Infrastructure.Workflows;
 
 namespace DbOptimizer.Infrastructure.Tests.Maf;
 
@@ -17,6 +18,7 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
     private readonly Mock<IDbContextFactory<DbOptimizerDbContext>> _dbContextFactoryMock;
     private readonly Mock<IMafWorkflowFactory> _workflowFactoryMock;
     private readonly Mock<IMafRunStateStore> _runStateStoreMock;
+    private readonly Mock<IWorkflowEventPublisher> _eventPublisherMock;
     private readonly MafWorkflowRuntime _runtime;
 
     public MafWorkflowRuntimeTests()
@@ -36,6 +38,7 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
 
         // Mock RunStateStore
         _runStateStoreMock = new Mock<IMafRunStateStore>();
+        _eventPublisherMock = new Mock<IWorkflowEventPublisher>();
 
         var options = new MafWorkflowRuntimeOptions();
         var loggerFactoryMock = new Mock<ILoggerFactory>();
@@ -48,7 +51,8 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
             _runStateStoreMock.Object,
             _dbContextFactoryMock.Object,
             options,
-            loggerFactoryMock.Object);
+            loggerFactoryMock.Object,
+            _eventPublisherMock.Object);
     }
 
     [Fact]
@@ -810,4 +814,3 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
         // DbContext instances are created per-call via factory, no cleanup needed
     }
 }
-

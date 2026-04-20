@@ -1,5 +1,7 @@
 using DbOptimizer.API.Api;
 using DbOptimizer.API.DatabaseMigrations;
+using DbOptimizer.API.Mcp;
+using DbOptimizer.API.Validators;
 using DbOptimizer.Infrastructure.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
@@ -16,25 +18,36 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 
+if (LocalDatabaseMcpServer.TryParse(args, out var localMcpEngine))
+{
+    await LocalDatabaseMcpServer.RunAsync(localMcpEngine);
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
+var currentAssemblyPath = typeof(Program).Assembly.Location;
 var postgreSqlConnectionString = ResolvePostgreSqlConnectionString(builder.Configuration);
 var redisConnectionString = ResolveRedisConnectionString(builder.Configuration);
+var allowLoopbackCorsOrigins = builder.Environment.IsDevelopment();
 var corsOrigins = builder.Configuration.GetSection("DbOptimizer:Cors:AllowedOrigins").Get<string[]>()
     ?? ["http://127.0.0.1:5173", "http://localhost:5173"];
 var workflowExecutionPlanOptions = builder.Configuration
     .GetSection(DbOptimizer.Infrastructure.Workflows.ExecutionPlanOptions.SectionName)
     .Get<DbOptimizer.Infrastructure.Workflows.ExecutionPlanOptions>()
     ?? CreateDefaultWorkflowExecutionPlanOptions();
+NormalizeWorkflowExecutionPlanOptions(workflowExecutionPlanOptions, currentAssemblyPath);
 var slowQueryExecutionPlanOptions = builder.Configuration
     .GetSection(DbOptimizer.Core.Models.ExecutionPlanOptions.SectionName)
     .Get<DbOptimizer.Core.Models.ExecutionPlanOptions>()
     ?? CreateDefaultSlowQueryExecutionPlanOptions();
+NormalizeSlowQueryExecutionPlanOptions(slowQueryExecutionPlanOptions, currentAssemblyPath);
 var workflowRuntimeOptions = builder.Configuration.GetSection(WorkflowRuntimeOptions.SectionName).Get<WorkflowRuntimeOptions>()
     ?? new WorkflowRuntimeOptions();
 var mafWorkflowRuntimeOptions = builder.Configuration.GetSection("MafWorkflowRuntime").Get<MafWorkflowRuntimeOptions>()
     ?? new MafWorkflowRuntimeOptions();
 var configCollectionOptions = builder.Configuration.GetSection(ConfigCollectionOptions.SectionName).Get<ConfigCollectionOptions>()
     ?? new ConfigCollectionOptions();
+NormalizeConfigCollectionOptions(configCollectionOptions, currentAssemblyPath);
 var slowQueryCollectionOptions = builder.Configuration.GetSection(SlowQueryCollectionOptions.SectionName).Get<SlowQueryCollectionOptions>()
     ?? new SlowQueryCollectionOptions();
 var tokenUsageRecorderOptions = builder.Configuration.GetSection("TokenUsageRecorder").Get<DbOptimizer.Infrastructure.Workflows.Monitoring.TokenUsageRecorderOptions>()
@@ -112,9 +125,18 @@ builder.Services.AddCors(options =>
     options.AddPolicy("frontend-dev", policy =>
     {
         policy
-            .AllowAnyOrigin()
             .AllowAnyHeader()
             .AllowAnyMethod();
+
+        if (allowLoopbackCorsOrigins)
+        {
+            policy.SetIsOriginAllowed(origin =>
+                IsAllowedLoopbackOrigin(origin) || corsOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase));
+        }
+        else
+        {
+            policy.WithOrigins(corsOrigins);
+        }
     });
 });
 builder.Services.AddEndpointsApiExplorer();
@@ -158,6 +180,7 @@ builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Events.IWorkf
 builder.Services.AddSingleton(Microsoft.Extensions.Options.Options.Create(tokenUsageRecorderOptions));
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Monitoring.ITokenUsageRecorder, DbOptimizer.Infrastructure.Workflows.Monitoring.TokenUsageRecorder>();
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.Projection.IWorkflowProjectionWriter, DbOptimizer.Infrastructure.Workflows.Projection.WorkflowProjectionWriter>();
+builder.Services.AddSingleton<DbOptimizer.Infrastructure.Workflows.IWorkflowExecutionAuditService, DbOptimizer.Infrastructure.Workflows.WorkflowExecutionAuditService>();
 builder.Services.AddSingleton<DbOptimizer.Core.Models.ISqlParser, DbOptimizer.Core.Models.LightweightSqlParser>();
 builder.Services.AddSingleton(workflowExecutionPlanOptions);
 builder.Services.AddSingleton(slowQueryExecutionPlanOptions);
@@ -168,6 +191,7 @@ builder.Services.AddSingleton(slowQueryCollectionOptions);
 // MAF Workflow Runtime 服务注册
 builder.Services.AddSingleton(mafWorkflowRuntimeOptions);
 builder.Services.AddSingleton<IMafWorkflowFactory, MafWorkflowFactory>();
+builder.Services.AddSingleton<IMafExecutorInstrumentation, MafExecutorInstrumentation>();
 builder.Services.AddSingleton<IMafWorkflowRuntime, MafWorkflowRuntime>();
 builder.Services.AddSingleton<IMafRunStateStore, MafRunStateStore>();
 builder.Services.AddSingleton<IMafCheckpointStore, MafCheckpointStore>();
@@ -176,6 +200,7 @@ builder.Services.AddSingleton<IMcpFallbackStrategy, McpFallbackStrategy>();
 // MCP 服务注册
 var mcpOptions = builder.Configuration.GetSection("DbOptimizer:Mcp").Get<DbOptimizer.Infrastructure.Mcp.McpOptions>()
     ?? throw new InvalidOperationException("Missing required configuration section: DbOptimizer:Mcp");
+mcpOptions = NormalizeMcpOptions(mcpOptions, currentAssemblyPath);
 var mySqlConnectionString = builder.Configuration.GetConnectionString("dboptimizer-mysql")
     ?? throw new InvalidOperationException("Missing MySQL connection string: ConnectionStrings:dboptimizer-mysql");
 var mcpFallbackOptions = new DbOptimizer.Infrastructure.Mcp.McpFallbackOptions
@@ -201,6 +226,7 @@ builder.Services.AddSingleton<IConfigRule, MySqlBufferPoolRule>();
 
 // FluentValidation 验证器注册
 builder.Services.AddValidatorsFromAssemblyContaining<DbOptimizer.Infrastructure.Workflows.Application.Validators.CreateSqlAnalysisWorkflowRequestValidator>();
+builder.Services.AddScoped<IValidator<SubmitReviewRequest>, ApiSubmitReviewRequestValidator>();
 builder.Services.AddSingleton<IConfigRule, MySqlMaxConnectionsRule>();
 builder.Services.AddSingleton<IConfigRule, PostgreSqlSharedBuffersRule>();
 builder.Services.AddSingleton<IConfigRule, PostgreSqlWorkMemRule>();
@@ -281,26 +307,21 @@ app.MapGet("/health", (MigrationReadinessState readinessState) =>
         : Results.Json(payload, statusCode: StatusCodes.Status503ServiceUnavailable);
 });
 
-app.MapGet("/debug/connections", (IConfiguration config) =>
+app.MapGet("/debug/connections", (IConfiguration config, IWebHostEnvironment environment) =>
 {
+    if (!environment.IsDevelopment())
+    {
+        return Results.NotFound();
+    }
+
     return Results.Ok(new
     {
-        postgres = MaskPassword(config.GetConnectionString("dboptimizer-postgres")),
-        mysql = MaskPassword(config.GetConnectionString("dboptimizer-mysql")),
-        redis = MaskPassword(config.GetConnectionString("redis")),
-        postgresResolved = MaskPassword(postgreSqlConnectionString),
-        redisResolved = MaskPassword(redisConnectionString)
+        postgresConfigured = !string.IsNullOrWhiteSpace(config.GetConnectionString("dboptimizer-postgres")),
+        mysqlConfigured = !string.IsNullOrWhiteSpace(config.GetConnectionString("dboptimizer-mysql")),
+        redisConfigured = !string.IsNullOrWhiteSpace(config.GetConnectionString("redis")),
+        postgresResolvedConfigured = !string.IsNullOrWhiteSpace(postgreSqlConnectionString),
+        redisResolvedConfigured = !string.IsNullOrWhiteSpace(redisConnectionString)
     });
-
-    static string? MaskPassword(string? connStr)
-    {
-        if (string.IsNullOrWhiteSpace(connStr)) return connStr;
-        return System.Text.RegularExpressions.Regex.Replace(
-            connStr,
-            @"(password|pwd)=([^;]+)",
-            "$1=***",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    }
 });
 
 app.MapWorkflowApi();
@@ -324,6 +345,24 @@ static string GetHeaderValue(HttpContext context, string headerName)
 
     var value = values.ToString();
     return string.IsNullOrWhiteSpace(value) ? "-" : value;
+}
+
+static bool IsAllowedLoopbackOrigin(string origin)
+{
+    if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+    {
+        return false;
+    }
+
+    if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    return uri.IsLoopback
+        && (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase));
 }
 
 static string ResolvePostgreSqlConnectionString(IConfiguration configuration)
@@ -374,20 +413,20 @@ static DbOptimizer.Infrastructure.Workflows.ExecutionPlanOptions CreateDefaultWo
         {
             Enabled = true,
             Transport = "stdio",
-            Command = "npx",
-            Arguments = "-y @modelcontextprotocol/server-mysql"
+            Command = "dotnet",
+            Arguments = LocalDatabaseMcpServer.BuildArguments(typeof(Program).Assembly.Location, "mysql")
         },
         PostgreSql = new DbOptimizer.Infrastructure.Workflows.ExecutionPlanMcpServerOptions
         {
             Enabled = true,
             Transport = "stdio",
-            Command = "npx",
-            Arguments = "-y @modelcontextprotocol/server-postgres"
+            Command = "dotnet",
+            Arguments = LocalDatabaseMcpServer.BuildArguments(typeof(Program).Assembly.Location, "postgresql")
         },
         TimeoutSeconds = 30,
         RetryCount = 2,
         RetryDelayMilliseconds = 1000,
-        EnableDirectDbFallback = true
+        EnableDirectDbFallback = false
     };
 }
 
@@ -399,19 +438,93 @@ static DbOptimizer.Core.Models.ExecutionPlanOptions CreateDefaultSlowQueryExecut
         {
             Enabled = true,
             Transport = "stdio",
-            Command = "npx",
-            Arguments = "-y @modelcontextprotocol/server-mysql"
+            Command = "dotnet",
+            Arguments = LocalDatabaseMcpServer.BuildArguments(typeof(Program).Assembly.Location, "mysql")
         },
         PostgreSql = new DbOptimizer.Core.Models.ExecutionPlanMcpServerOptions
         {
             Enabled = true,
             Transport = "stdio",
-            Command = "npx",
-            Arguments = "-y @modelcontextprotocol/server-postgres"
+            Command = "dotnet",
+            Arguments = LocalDatabaseMcpServer.BuildArguments(typeof(Program).Assembly.Location, "postgresql")
         },
         TimeoutSeconds = 30,
         RetryCount = 2,
         RetryDelayMilliseconds = 1000,
-        EnableDirectDbFallback = true
+        EnableDirectDbFallback = false
+    };
+}
+
+static void NormalizeWorkflowExecutionPlanOptions(DbOptimizer.Infrastructure.Workflows.ExecutionPlanOptions options, string assemblyPath)
+{
+    NormalizeWorkflowServerOptions(options.MySql, "mysql", assemblyPath);
+    NormalizeWorkflowServerOptions(options.PostgreSql, "postgresql", assemblyPath);
+}
+
+static void NormalizeSlowQueryExecutionPlanOptions(DbOptimizer.Core.Models.ExecutionPlanOptions options, string assemblyPath)
+{
+    NormalizeSlowQueryServerOptions(options.MySql, "mysql", assemblyPath);
+    NormalizeSlowQueryServerOptions(options.PostgreSql, "postgresql", assemblyPath);
+}
+
+static void NormalizeConfigCollectionOptions(ConfigCollectionOptions options, string assemblyPath)
+{
+    NormalizeConfigCollectionServerOptions(options.MySql, "mysql", assemblyPath);
+    NormalizeConfigCollectionServerOptions(options.PostgreSql, "postgresql", assemblyPath);
+}
+
+static DbOptimizer.Infrastructure.Mcp.McpOptions NormalizeMcpOptions(DbOptimizer.Infrastructure.Mcp.McpOptions options, string assemblyPath)
+{
+    return options with
+    {
+        MySql = NormalizeMcpServerOptions(options.MySql, "mysql", assemblyPath),
+        PostgreSql = NormalizeMcpServerOptions(options.PostgreSql, "postgresql", assemblyPath)
+    };
+}
+
+static void NormalizeWorkflowServerOptions(DbOptimizer.Infrastructure.Workflows.ExecutionPlanMcpServerOptions serverOptions, string engine, string assemblyPath)
+{
+    if (!LocalDatabaseMcpServer.ShouldUseLocalServer(serverOptions.Command, serverOptions.Arguments))
+    {
+        return;
+    }
+
+    serverOptions.Command = "dotnet";
+    serverOptions.Arguments = LocalDatabaseMcpServer.BuildArguments(assemblyPath, engine);
+}
+
+static void NormalizeConfigCollectionServerOptions(ConfigCollectionMcpServerOptions serverOptions, string engine, string assemblyPath)
+{
+    if (!LocalDatabaseMcpServer.ShouldUseLocalServer(serverOptions.Command, serverOptions.Arguments))
+    {
+        return;
+    }
+
+    serverOptions.Command = "dotnet";
+    serverOptions.Arguments = LocalDatabaseMcpServer.BuildArguments(assemblyPath, engine);
+}
+
+static void NormalizeSlowQueryServerOptions(DbOptimizer.Core.Models.ExecutionPlanMcpServerOptions serverOptions, string engine, string assemblyPath)
+{
+    if (!LocalDatabaseMcpServer.ShouldUseLocalServer(serverOptions.Command, serverOptions.Arguments))
+    {
+        return;
+    }
+
+    serverOptions.Command = "dotnet";
+    serverOptions.Arguments = LocalDatabaseMcpServer.BuildArguments(assemblyPath, engine);
+}
+
+static DbOptimizer.Infrastructure.Mcp.McpServerOptions NormalizeMcpServerOptions(DbOptimizer.Infrastructure.Mcp.McpServerOptions serverOptions, string engine, string assemblyPath)
+{
+    if (!LocalDatabaseMcpServer.ShouldUseLocalServer(serverOptions.Command, serverOptions.Arguments))
+    {
+        return serverOptions;
+    }
+
+    return serverOptions with
+    {
+        Command = "dotnet",
+        Arguments = LocalDatabaseMcpServer.BuildArguments(assemblyPath, engine)
     };
 }

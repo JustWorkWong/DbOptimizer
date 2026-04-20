@@ -64,7 +64,7 @@ public sealed class ExecutionPlanOptions
 
     public int RetryDelayMilliseconds { get; set; } = 1_000;
 
-    public bool EnableDirectDbFallback { get; set; } = true;
+    public bool EnableDirectDbFallback { get; set; } = false;
 }
 
 public sealed class ExecutionPlanMcpServerOptions

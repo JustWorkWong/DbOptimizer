@@ -14,7 +14,8 @@
       "Bash(npx playwright *)",
       "Bash(netstat -ano)",
       "Bash(findstr :5001)",
-      "Bash(dotnet list *)"
+      "Bash(dotnet list *)",
+      "mcp__context7__resolve-library-id"
     ]
   }
 }
