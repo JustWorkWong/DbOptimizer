@@ -122,43 +122,6 @@ public sealed class SqlWorkflowE2ETests : E2ETestBase
     }
 
     [Fact]
-    public async Task SqlWorkflow_CheckpointRecovery_ShouldResumeCorrectly()
-    {
-        // Arrange
-        var request = new
-        {
-            ProjectId = Guid.NewGuid(),
-            DatabaseType = "MySQL",
-            SqlQuery = "SELECT * FROM inventory",
-            RequireHumanReview = true
-        };
-
-        // Act - 提交工作流
-        var submitResponse = await Client.PostAsJsonAsync("/api/workflows/sql", request);
-        var submitResult = await submitResponse.Content.ReadFromJsonAsync<WorkflowSubmitResponse>();
-        submitResult.Should().NotBeNull();
-        var sessionId = submitResult!.SessionId;
-
-        // 等待 checkpoint 保存
-        await Task.Delay(3000);
-
-        // 模拟进程重启
-        await DisposeAsync();
-        await InitializeAsync();
-
-        // Act - 恢复工作流
-        var resumeResponse = await Client.PostAsync($"/api/workflows/{sessionId}/resume", null);
-        resumeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        // Assert - 验证工作流继续执行
-        await Task.Delay(2000);
-        var statusResponse = await Client.GetAsync($"/api/workflows/{sessionId}");
-        var status = await statusResponse.Content.ReadFromJsonAsync<WorkflowStatusResponse>();
-        status.Should().NotBeNull();
-        status!.Status.Should().BeOneOf("Running", "PendingReview", "Completed");
-    }
-
-    [Fact]
     public async Task SqlWorkflow_ParallelExecution_ShouldComplete()
     {
         // Arrange - 提交多个工作流

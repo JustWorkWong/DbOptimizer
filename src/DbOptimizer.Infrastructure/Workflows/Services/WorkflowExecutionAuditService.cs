@@ -122,7 +122,7 @@ public sealed class WorkflowExecutionAuditService(
 
             entity.CompletedAt = completedAt;
             entity.Status = result.NextStatus == Checkpointing.WorkflowCheckpointStatus.WaitingForReview
-                ? "WaitingReview"
+                ? WorkflowSessionStatus.WaitingForReview
                 : "Completed";
             entity.OutputData = WorkflowExecutionAuditHelper.Serialize(new
             {
