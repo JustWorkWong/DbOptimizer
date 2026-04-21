@@ -2,7 +2,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using DbOptimizer.Core.Models;
-using DbOptimizer.Core.Models;
 
 namespace DbOptimizer.Infrastructure.SlowQuery;
 

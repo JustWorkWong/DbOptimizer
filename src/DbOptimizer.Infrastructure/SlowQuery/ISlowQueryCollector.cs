@@ -1,5 +1,4 @@
 using DbOptimizer.Core.Models;
-using DbOptimizer.Core.Models;
 
 namespace DbOptimizer.Infrastructure.SlowQuery;
 

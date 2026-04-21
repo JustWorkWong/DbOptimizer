@@ -154,11 +154,7 @@ public sealed class PromptVersionService(
             throw new InvalidOperationException($"Prompt version {versionId} not found.");
         }
 
-        await dbContext.PromptVersions
-            .Where(x => x.AgentName == target.AgentName && x.IsActive)
-            .ExecuteUpdateAsync(
-                setters => setters.SetProperty(x => x.IsActive, false),
-                cancellationToken);
+        await DeactivateActiveVersionsAsync(dbContext, target.AgentName, cancellationToken);
 
         target.IsActive = true;
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -188,11 +184,7 @@ public sealed class PromptVersionService(
                 $"Prompt version not found. AgentName={agentName}, VersionNumber={versionNumber}");
         }
 
-        await dbContext.PromptVersions
-            .Where(x => x.AgentName == agentName && x.IsActive)
-            .ExecuteUpdateAsync(
-                setters => setters.SetProperty(x => x.IsActive, false),
-                cancellationToken);
+        await DeactivateActiveVersionsAsync(dbContext, agentName, cancellationToken);
 
         target.IsActive = true;
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -202,5 +194,34 @@ public sealed class PromptVersionService(
             target.AgentName,
             target.VersionNumber,
             target.VersionId);
+    }
+
+    private static async Task DeactivateActiveVersionsAsync(
+        DbOptimizerDbContext dbContext,
+        string agentName,
+        CancellationToken cancellationToken)
+    {
+        if (string.Equals(
+            dbContext.Database.ProviderName,
+            "Microsoft.EntityFrameworkCore.InMemory",
+            StringComparison.Ordinal))
+        {
+            var activeVersions = await dbContext.PromptVersions
+                .Where(x => x.AgentName == agentName && x.IsActive)
+                .ToListAsync(cancellationToken);
+
+            foreach (var activeVersion in activeVersions)
+            {
+                activeVersion.IsActive = false;
+            }
+
+            return;
+        }
+
+        await dbContext.PromptVersions
+            .Where(x => x.AgentName == agentName && x.IsActive)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(x => x.IsActive, false),
+                cancellationToken);
     }
 }

@@ -67,6 +67,9 @@ public sealed class DbOptimizerDbContext(DbContextOptions<DbOptimizerDbContext> 
         entity.Property(x => x.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("NOW()");
         entity.Property(x => x.CompletedAt).HasColumnName("completed_at");
         entity.Property(x => x.ErrorMessage).HasColumnName("error_message");
+        entity.Property(x => x.AgentSessionIds).HasColumnName("agent_session_ids").HasColumnType("jsonb").HasDefaultValue("[]");
+        entity.Property(x => x.TotalTokens).HasColumnName("total_tokens").HasDefaultValue(0);
+        entity.Property(x => x.EstimatedCost).HasColumnName("estimated_cost").HasPrecision(12, 4);
 
         entity.HasIndex(x => x.Status).HasDatabaseName("idx_workflow_sessions_status");
         entity.HasIndex(x => x.CreatedAt).HasDatabaseName("idx_workflow_sessions_created_at_desc").IsDescending(true);
@@ -343,6 +346,12 @@ public sealed class WorkflowSessionEntity
     public DateTimeOffset? CompletedAt { get; set; }
 
     public string? ErrorMessage { get; set; }
+
+    public string AgentSessionIds { get; set; } = "[]";
+
+    public int TotalTokens { get; set; }
+
+    public decimal? EstimatedCost { get; set; }
 
     public ICollection<AgentExecutionEntity> AgentExecutions { get; set; } = new List<AgentExecutionEntity>();
 

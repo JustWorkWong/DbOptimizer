@@ -3,7 +3,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using DbOptimizer.Core.Models;
 using System.Text.Json;
-using DbOptimizer.Core.Models;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 

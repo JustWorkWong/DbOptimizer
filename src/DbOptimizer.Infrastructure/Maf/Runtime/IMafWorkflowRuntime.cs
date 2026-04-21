@@ -60,7 +60,12 @@ public sealed record SqlAnalysisWorkflowCommand(
     string SqlText,
     string DatabaseType,
     string? SchemaName = null,
-    bool RequireHumanReview = false);
+    bool EnableIndexRecommendation = true,
+    bool EnableSqlRewrite = true,
+    bool RequireHumanReview = false,
+    string DatabaseId = "",
+    string SourceType = "manual",
+    Guid? SourceRefId = null);
 
 /// <summary>
 /// 数据库配置优化 workflow 命令
@@ -70,7 +75,9 @@ public sealed record DbConfigWorkflowCommand(
     string DatabaseId,
     string DatabaseType,
     bool AllowFallbackSnapshot = false,
-    bool RequireHumanReview = false);
+    bool RequireHumanReview = false,
+    string SourceType = "manual",
+    Guid? SourceRefId = null);
 
 /// <summary>
 /// Workflow 启动响应

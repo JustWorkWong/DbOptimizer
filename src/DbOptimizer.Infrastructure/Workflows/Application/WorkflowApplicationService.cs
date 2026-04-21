@@ -38,7 +38,12 @@ public sealed class WorkflowApplicationService(
             SqlText: request.SqlText.Trim(),
             DatabaseType: databaseEngine,
             SchemaName: null,
-            RequireHumanReview: request.Options.RequireHumanReview);
+            EnableIndexRecommendation: request.Options.EnableIndexRecommendation,
+            EnableSqlRewrite: request.Options.EnableSqlRewrite,
+            RequireHumanReview: request.Options.RequireHumanReview,
+            DatabaseId: request.DatabaseId.Trim(),
+            SourceType: request.SourceType,
+            SourceRefId: request.SourceRefId);
 
         var mafResponse = await mafWorkflowRuntime.StartSqlAnalysisAsync(command, cancellationToken);
 
@@ -69,7 +74,7 @@ public sealed class WorkflowApplicationService(
             SessionId: sessionId,
             DatabaseId: request.DatabaseId.Trim(),
             DatabaseType: databaseEngine,
-            AllowFallbackSnapshot: false,
+            AllowFallbackSnapshot: request.Options.AllowFallbackSnapshot,
             RequireHumanReview: request.Options.RequireHumanReview);
 
         var mafResponse = await mafWorkflowRuntime.StartDbConfigOptimizationAsync(command, cancellationToken);
