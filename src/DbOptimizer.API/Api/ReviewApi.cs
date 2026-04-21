@@ -1,6 +1,5 @@
 using System.Text.Json;
 using DbOptimizer.Core.Models;
-using DbOptimizer.Infrastructure.Checkpointing;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
 using DbOptimizer.Infrastructure.Workflows.Review;
@@ -427,7 +426,7 @@ internal sealed class ReviewApplicationService(
         };
     }
 
-    private async Task ResumeWorkflowAsync(
+    private async Task<WorkflowResumeResponse> ResumeWorkflowAsync(
         string workflowType,
         Guid sessionId,
         ExternalResponse response,
@@ -436,11 +435,9 @@ internal sealed class ReviewApplicationService(
         switch (workflowType)
         {
             case "sql_analysis":
-                await mafWorkflowRuntime.ResumeSqlWorkflowAsync(sessionId, response, cancellationToken);
-                return;
+                return await mafWorkflowRuntime.ResumeSqlWorkflowAsync(sessionId, response, cancellationToken);
             case "db_config_optimization":
-                await mafWorkflowRuntime.ResumeConfigWorkflowAsync(sessionId, response, cancellationToken);
-                return;
+                return await mafWorkflowRuntime.ResumeConfigWorkflowAsync(sessionId, response, cancellationToken);
             default:
                 throw new ApiException(
                     StatusCodes.Status400BadRequest,

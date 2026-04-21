@@ -36,7 +36,7 @@ public sealed class WorkflowReviewResponseFactory : IWorkflowReviewResponseFacto
             taskId,
             action,
             comment,
-            adjustments,
+            new Dictionary<string, JsonElement>(adjustments),
             DateTimeOffset.UtcNow));
     }
 
@@ -58,7 +58,7 @@ public sealed class WorkflowReviewResponseFactory : IWorkflowReviewResponseFacto
             taskId,
             action,
             comment,
-            adjustments,
+            new Dictionary<string, JsonElement>(adjustments),
             DateTimeOffset.UtcNow));
     }
 }

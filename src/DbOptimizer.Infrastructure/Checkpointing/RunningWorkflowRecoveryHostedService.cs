@@ -23,8 +23,7 @@ public sealed class RunningWorkflowRecoveryHostedService(
         await using var dbContext = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         var runningSessionIds = await dbContext.WorkflowSessions
             .AsNoTracking()
-            .Where(x => string.Equals(x.Status, WorkflowCheckpointStatus.Running.ToString(), StringComparison.OrdinalIgnoreCase)
-                     || string.Equals(x.Status, WorkflowSessionStatus.Running, StringComparison.OrdinalIgnoreCase))
+            .Where(x => x.Status == WorkflowSessionStatus.Running)
             .Select(x => x.SessionId)
             .ToListAsync(cancellationToken);
 

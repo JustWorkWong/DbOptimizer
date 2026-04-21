@@ -151,6 +151,32 @@ export interface WorkflowStatus {
   errorMessage: string | null
 }
 
+interface WorkflowStatusApiResponse {
+  sessionId: string
+  workflowType: string
+  engineType: string
+  status: string
+  currentNode: string | null
+  progressPercent: number
+  startedAt: string
+  updatedAt: string
+  completedAt: string | null
+  source: {
+    sourceType: string
+    sourceRefId: string | null
+  } | null
+  review: {
+    reviewId: string
+    status: string
+  } | null
+  result: WorkflowResultEnvelope | null
+  error: {
+    code: string
+    message: string
+    details: Record<string, unknown> | null
+  } | null
+}
+
 export interface SqlAnalysisStartResponse {
   sessionId: string
   status: string
@@ -415,7 +441,7 @@ export function submitReview(taskId: string, payload: SubmitReviewPayload) {
 }
 
 export function getWorkflow(sessionId: string) {
-  return fetchEnvelope<WorkflowStatus>(`/api/workflows/${sessionId}`)
+  return fetchEnvelope<WorkflowStatusApiResponse>(`/api/workflows/${sessionId}`).then(mapWorkflowStatus)
 }
 
 export function createSqlAnalysis(payload: CreateSqlAnalysisPayload) {
@@ -460,6 +486,23 @@ export function getHistoryReplay(sessionId: string) {
 export function createWorkflowEventSource(sessionId: string) {
   const url = new URL(`${apiBase}/api/workflows/${sessionId}/events`, window.location.origin)
   return new EventSource(url.toString())
+}
+
+function mapWorkflowStatus(response: WorkflowStatusApiResponse): WorkflowStatus {
+  return {
+    sessionId: response.sessionId,
+    workflowType: response.workflowType,
+    status: response.status,
+    currentExecutor: response.currentNode,
+    progress: response.progressPercent,
+    startedAt: response.startedAt,
+    updatedAt: response.updatedAt,
+    completedAt: response.completedAt,
+    result: response.result,
+    reviewId: response.review?.reviewId ?? null,
+    reviewStatus: response.review?.status ?? null,
+    errorMessage: response.error?.message ?? null,
+  }
 }
 
 export function getSlowQueryTrends(params: { databaseId: string; days?: number }) {

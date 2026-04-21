@@ -178,6 +178,7 @@ public sealed class ExecutionPlanProvider(
         var rawText = textBlocks.Length > 0
             ? string.Join(Environment.NewLine, textBlocks)
             : JsonSerializer.Serialize(result.Content);
+        rawText = UnwrapExplainPayload(rawText);
 
         if (result.IsError == true)
         {
@@ -373,5 +374,46 @@ public sealed class ExecutionPlanProvider(
         const int maxLength = 160;
         var singleLine = sqlText.ReplaceLineEndings(" ").Trim();
         return singleLine.Length <= maxLength ? singleLine : $"{singleLine[..maxLength]}...";
+    }
+
+    private static string UnwrapExplainPayload(string rawText)
+    {
+        if (string.IsNullOrWhiteSpace(rawText))
+        {
+            return rawText;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(rawText);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("ok", out var okElement) ||
+                okElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            {
+                return rawText;
+            }
+
+            if (okElement.GetBoolean())
+            {
+                return document.RootElement.TryGetProperty("plan", out var planElement)
+                    ? planElement.GetRawText()
+                    : rawText;
+            }
+
+            var error = document.RootElement.TryGetProperty("error", out var errorElement)
+                ? errorElement.GetString()
+                : null;
+            var exceptionType = document.RootElement.TryGetProperty("exceptionType", out var exceptionTypeElement)
+                ? exceptionTypeElement.GetString()
+                : null;
+
+            return string.IsNullOrWhiteSpace(exceptionType)
+                ? error ?? rawText
+                : $"{exceptionType}: {error ?? "Unknown explain error."}";
+        }
+        catch (JsonException)
+        {
+            return rawText;
+        }
     }
 }

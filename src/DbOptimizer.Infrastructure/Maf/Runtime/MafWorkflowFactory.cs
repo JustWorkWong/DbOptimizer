@@ -31,8 +31,7 @@ public sealed class MafWorkflowFactory : IMafWorkflowFactory
         var indexAdvisor = CreateBinding<IndexAdvisorMafExecutor, SqlAnalysis.ExecutionPlanCompletedMessage, SqlAnalysis.IndexRecommendationCompletedMessage>("sql_analysis");
         var sqlRewrite = CreateBinding<SqlRewriteMafExecutor, SqlAnalysis.IndexRecommendationCompletedMessage, SqlAnalysis.SqlRewriteCompletedMessage>("sql_analysis");
         var coordinator = CreateBinding<SqlCoordinatorMafExecutor, SqlAnalysis.SqlRewriteCompletedMessage, SqlAnalysis.SqlOptimizationDraftReadyMessage>("sql_analysis");
-        var reviewGate = CreateBinding<SqlHumanReviewGateExecutor, SqlAnalysis.SqlOptimizationDraftReadyMessage>("sql_analysis");
-        var reviewDecision = CreateBinding<SqlHumanReviewDecisionExecutor, SqlAnalysis.SqlReviewResponseMessage, SqlAnalysis.SqlOptimizationCompletedMessage>("sql_analysis");
+        var reviewGate = CreateBinding<SqlHumanReviewGateExecutor>();
         var reviewPort = MafReviewPorts.SqlReview;
 
         // 构建 workflow graph
@@ -54,9 +53,8 @@ public sealed class MafWorkflowFactory : IMafWorkflowFactory
         // Sequential: coordinator → review gate
         builder.AddEdge(coordinator, reviewGate);
         builder.AddEdge(reviewGate, reviewPort);
-        builder.AddEdge(reviewPort, reviewDecision);
+        builder.AddEdge(reviewPort, reviewGate);
         builder.WithOutputFrom(reviewGate);
-        builder.WithOutputFrom(reviewDecision);
 
         return builder.Build();
     }
@@ -72,8 +70,7 @@ public sealed class MafWorkflowFactory : IMafWorkflowFactory
         var collector = CreateBinding<ConfigCollectorMafExecutor, DbConfig.DbConfigWorkflowCommand, DbConfig.ConfigSnapshotCollectedMessage>("db_config_optimization");
         var analyzer = CreateBinding<ConfigAnalyzerMafExecutor, DbConfig.ConfigSnapshotCollectedMessage, DbConfig.ConfigRecommendationsGeneratedMessage>("db_config_optimization");
         var coordinator = CreateBinding<ConfigCoordinatorMafExecutor, DbConfig.ConfigRecommendationsGeneratedMessage, DbConfig.DbConfigOptimizationDraftReadyMessage>("db_config_optimization");
-        var reviewGate = CreateBinding<ConfigHumanReviewGateExecutor, DbConfig.DbConfigOptimizationDraftReadyMessage>("db_config_optimization");
-        var reviewDecision = CreateBinding<ConfigHumanReviewDecisionExecutor, DbConfig.ConfigReviewDecisionResponseMessage, DbConfig.DbConfigOptimizationCompletedMessage>("db_config_optimization");
+        var reviewGate = CreateBinding<ConfigHumanReviewGateExecutor>();
         var reviewPort = MafReviewPorts.ConfigReview;
 
         // 构建 workflow graph
@@ -85,9 +82,8 @@ public sealed class MafWorkflowFactory : IMafWorkflowFactory
         builder.AddEdge(analyzer, coordinator);
         builder.AddEdge(coordinator, reviewGate);
         builder.AddEdge(reviewGate, reviewPort);
-        builder.AddEdge(reviewPort, reviewDecision);
+        builder.AddEdge(reviewPort, reviewGate);
         builder.WithOutputFrom(reviewGate);
-        builder.WithOutputFrom(reviewDecision);
 
         return builder.Build();
     }
@@ -120,6 +116,18 @@ public sealed class MafWorkflowFactory : IMafWorkflowFactory
             wrappedExecutor.Id,
             _ => ValueTask.FromResult<Executor>(wrappedExecutor),
             wrappedExecutor.GetType(),
+            null);
+    }
+
+    private ExecutorBinding CreateBinding<TExecutor>()
+        where TExecutor : Executor
+    {
+        var executor = _serviceProvider.GetRequiredService<TExecutor>();
+
+        return new ServiceProviderExecutorBinding(
+            executor.Id,
+            _ => ValueTask.FromResult<Executor>(executor),
+            executor.GetType(),
             null);
     }
 }

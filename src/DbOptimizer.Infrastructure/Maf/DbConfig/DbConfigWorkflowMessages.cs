@@ -49,7 +49,7 @@ public sealed record ConfigReviewDecisionResponseMessage(
     Guid TaskId,
     string Action,
     string? Comment,
-    IReadOnlyDictionary<string, JsonElement> Adjustments,
+    Dictionary<string, JsonElement> Adjustments,
     DateTimeOffset ReviewedAt);
 
 /* =========================

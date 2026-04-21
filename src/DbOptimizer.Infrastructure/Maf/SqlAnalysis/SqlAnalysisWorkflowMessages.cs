@@ -61,7 +61,7 @@ public sealed record SqlReviewResponseMessage(
     Guid TaskId,
     string Action,
     string? Comment,
-    IReadOnlyDictionary<string, JsonElement> Adjustments,
+    Dictionary<string, JsonElement> Adjustments,
     DateTimeOffset ReviewedAt);
 
 public sealed record SqlOptimizationCompletedMessage(
