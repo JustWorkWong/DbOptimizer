@@ -19,6 +19,13 @@
 
 所有 workflow 设计已基于 MAF 实现。
 
+### LLM Phase 1 Status
+
+- `DbOptimizer.Infrastructure` 已接入 `Microsoft.Extensions.AI` / `Microsoft.Extensions.AI.OpenAI`
+- API 宿主支持从 `appsettings.Local.json` 读取 `LlmProvider` 配置
+- 新增 `MafFeatureFlags`、`IChatClientService`、`LlmPromptManager`、`LlmExecutionLogger`
+- `workflow_sessions` 已增加 `agent_session_ids`、`total_tokens`、`estimated_cost` 聚合字段
+
 ## Design Structure
 
 ### API Design

@@ -56,8 +56,8 @@ internal sealed class MafConfigWorkflowStarter
             await CreateWorkflowSessionAsync(
                 command.SessionId,
                 "db_config_optimization",
-                "manual",
-                null,
+                command.SourceType,
+                command.SourceRefId,
                 cancellationToken);
 
             var mafCommand = new DbConfig.DbConfigWorkflowCommand(
@@ -177,6 +177,9 @@ internal sealed class MafConfigWorkflowStarter
                 cancellationToken);
 
             var status = await run.GetStatusAsync(cancellationToken);
+            var emittedWorkflowOutput = run.OutgoingEvents
+                .OfType<WorkflowOutputEvent>()
+                .Any();
             var pendingRequest = run.OutgoingEvents
                 .OfType<RequestInfoEvent>()
                 .LastOrDefault();
@@ -213,7 +216,15 @@ internal sealed class MafConfigWorkflowStarter
                     cancellationToken);
             }
 
-            await UpdateSessionFromStatusAsync(sessionId, runId, status, checkpointRef, requestId, taskId, superstep, cancellationToken);
+            await UpdateSessionFromStatusAsync(
+                sessionId,
+                runId,
+                NormalizeRunStatus(status, emittedWorkflowOutput),
+                checkpointRef,
+                requestId,
+                taskId,
+                superstep,
+                cancellationToken);
         }
         catch (Exception ex)
         {
@@ -350,6 +361,16 @@ internal sealed class MafConfigWorkflowStarter
     {
         var runState = await _runStateStore.GetAsync(sessionId, cancellationToken);
         return runState?.CheckpointRef;
+    }
+
+    private static RunStatus NormalizeRunStatus(RunStatus status, bool emittedWorkflowOutput)
+    {
+        return status switch
+        {
+            RunStatus.Idle when emittedWorkflowOutput => RunStatus.Ended,
+            RunStatus.Idle => RunStatus.Ended,
+            _ => status
+        };
     }
 }
 

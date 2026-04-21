@@ -27,13 +27,43 @@ public sealed class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<DbO
     private static IConfigurationRoot BuildConfiguration()
     {
         var environmentName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        var currentDirectory = Directory.GetCurrentDirectory();
+        var apiProjectDirectory = ResolveApiProjectDirectory(currentDirectory);
 
         return new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
+            .SetBasePath(currentDirectory)
             .AddJsonFile("appsettings.json", optional: true)
             .AddJsonFile($"appsettings.{environmentName}.json", optional: true)
+            .AddJsonFile("appsettings.Local.json", optional: true)
+            .AddJsonFile(Path.Combine(apiProjectDirectory, "appsettings.json"), optional: true)
+            .AddJsonFile(Path.Combine(apiProjectDirectory, $"appsettings.{environmentName}.json"), optional: true)
+            .AddJsonFile(Path.Combine(apiProjectDirectory, "appsettings.Local.json"), optional: true)
             .AddEnvironmentVariables()
             .Build();
+    }
+
+    private static string ResolveApiProjectDirectory(string currentDirectory)
+    {
+        var directory = new DirectoryInfo(currentDirectory);
+
+        while (directory is not null)
+        {
+            var srcCandidate = Path.Combine(directory.FullName, "src", "DbOptimizer.API");
+            if (Directory.Exists(srcCandidate))
+            {
+                return srcCandidate;
+            }
+
+            var siblingCandidate = Path.Combine(directory.FullName, "DbOptimizer.API");
+            if (Directory.Exists(siblingCandidate))
+            {
+                return siblingCandidate;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return currentDirectory;
     }
 
     private static string ResolveDesignTimeConnectionString(IConfiguration configuration)

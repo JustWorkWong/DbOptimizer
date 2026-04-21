@@ -55,19 +55,21 @@ internal sealed class MafSqlWorkflowStarter
             await CreateWorkflowSessionAsync(
                 command.SessionId,
                 "sql_analysis",
-                "manual",
-                null,
+                command.SourceType,
+                command.SourceRefId,
                 cancellationToken);
 
             var mafCommand = new SqlAnalysis.SqlAnalysisWorkflowCommand(
                 SessionId: command.SessionId,
                 SqlText: command.SqlText,
-                DatabaseId: command.SessionId.ToString(),
+                DatabaseId: string.IsNullOrWhiteSpace(command.DatabaseId)
+                    ? command.SessionId.ToString()
+                    : command.DatabaseId,
                 DatabaseEngine: command.DatabaseType,
-                SourceType: "manual",
-                SourceRefId: null,
-                EnableIndexRecommendation: true,
-                EnableSqlRewrite: true,
+                SourceType: command.SourceType,
+                SourceRefId: command.SourceRefId,
+                EnableIndexRecommendation: command.EnableIndexRecommendation,
+                EnableSqlRewrite: command.EnableSqlRewrite,
                 RequireHumanReview: command.RequireHumanReview);
 
             var workflow = _workflowFactory.BuildSqlAnalysisWorkflow();
@@ -180,6 +182,9 @@ internal sealed class MafSqlWorkflowStarter
                 cancellationToken);
 
             var status = await run.GetStatusAsync(cancellationToken);
+            var emittedWorkflowOutput = run.OutgoingEvents
+                .OfType<WorkflowOutputEvent>()
+                .Any();
             var pendingRequest = run.OutgoingEvents
                 .OfType<RequestInfoEvent>()
                 .LastOrDefault();
@@ -216,7 +221,15 @@ internal sealed class MafSqlWorkflowStarter
                     cancellationToken);
             }
 
-            await UpdateSessionFromStatusAsync(sessionId, runId, status, checkpointRef, requestId, taskId, superstep, cancellationToken);
+            await UpdateSessionFromStatusAsync(
+                sessionId,
+                runId,
+                NormalizeRunStatus(status, emittedWorkflowOutput),
+                checkpointRef,
+                requestId,
+                taskId,
+                superstep,
+                cancellationToken);
         }
         catch (Exception ex)
         {
@@ -353,6 +366,16 @@ internal sealed class MafSqlWorkflowStarter
     {
         var runState = await _runStateStore.GetAsync(sessionId, cancellationToken);
         return runState?.CheckpointRef;
+    }
+
+    private static RunStatus NormalizeRunStatus(RunStatus status, bool emittedWorkflowOutput)
+    {
+        return status switch
+        {
+            RunStatus.Idle when emittedWorkflowOutput => RunStatus.Ended,
+            RunStatus.Idle => RunStatus.Ended,
+            _ => status
+        };
     }
 }
 

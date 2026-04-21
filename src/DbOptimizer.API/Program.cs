@@ -3,6 +3,7 @@ using DbOptimizer.API.DatabaseMigrations;
 using DbOptimizer.API.Mcp;
 using DbOptimizer.API.Validators;
 using DbOptimizer.Infrastructure.Checkpointing;
+using DbOptimizer.Infrastructure.DependencyInjection;
 using DbOptimizer.Infrastructure.Persistence;
 using DbOptimizer.Infrastructure.Workflows;
 using DbOptimizer.Infrastructure.SlowQuery;
@@ -28,6 +29,8 @@ if (LocalDatabaseMcpServer.TryParse(args, out var localMcpEngine))
 }
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+builder.Configuration.AddEnvironmentVariables();
 var currentAssemblyPath = typeof(Program).Assembly.Location;
 var postgreSqlConnectionString = ResolvePostgreSqlConnectionString(builder.Configuration);
 var redisConnectionString = ResolveRedisConnectionString(builder.Configuration);
@@ -246,6 +249,7 @@ builder.Services.AddSingleton<IConfigRuleEngine, ConfigRuleEngine>();
 builder.Services.AddSingleton<IReviewTaskService, ReviewTaskService>();
 builder.Services.AddSingleton<IConfigReviewTaskService, ConfigReviewTaskService>();
 builder.Services.AddSingleton<IPromptVersionService, PromptVersionService>();
+builder.Services.AddLlmInfrastructure(builder.Configuration);
 
 // MAF SQL Analysis Executors
 builder.Services.AddSingleton<DbOptimizer.Infrastructure.Maf.SqlAnalysis.ISqlRewriteAdvisor, DbOptimizer.Infrastructure.Maf.SqlAnalysis.NoOpSqlRewriteAdvisor>();
@@ -277,6 +281,7 @@ builder.Services.AddSingleton<ISlowQueryWorkflowSubmissionService, SlowQueryWork
 builder.Services.AddSingleton<ISlowQueryDashboardQueryService, SlowQueryDashboardQueryService>();
 builder.Services.AddSingleton<MigrationReadinessState>();
 builder.Services.AddHostedService<EfMigrationHostedService>();
+builder.Services.AddHostedService<LlmPromptInitializationHostedService>();
 builder.Services.AddHostedService<RunningWorkflowRecoveryHostedService>();
 builder.Services.AddHostedService<SlowQueryCollectionService>();
 

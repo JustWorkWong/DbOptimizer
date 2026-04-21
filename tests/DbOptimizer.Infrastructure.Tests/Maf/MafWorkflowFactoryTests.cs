@@ -7,8 +7,11 @@ using DbOptimizer.Infrastructure.Maf.SqlAnalysis;
 using DbOptimizer.Infrastructure.Maf.SqlAnalysis.Executors;
 using DbOptimizer.Infrastructure.Maf.DbConfig;
 using DbOptimizer.Infrastructure.Maf.DbConfig.Executors;
+using DbOptimizer.Infrastructure.Llm;
+using DbOptimizer.Infrastructure.Prompts;
 using DbOptimizer.Infrastructure.Workflows;
 using DbOptimizer.Infrastructure.Workflows.Review;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace DbOptimizer.Infrastructure.Tests.Maf;
@@ -47,6 +50,8 @@ public sealed class MafWorkflowFactoryTests
         services.AddSingleton(Mock.Of<IExecutionPlanProvider>());
         services.AddSingleton(Mock.Of<IExecutionPlanAnalyzer>());
         services.AddSingleton(Mock.Of<IIndexRecommendationGenerator>());
+        services.AddSingleton(Mock.Of<ITableIndexMetadataProvider>());
+        services.AddSingleton(Mock.Of<ITableIndexMetadataAnalyzer>());
         services.AddSingleton(Mock.Of<ISqlRewriteAdvisor>());
         services.AddSingleton(Mock.Of<IWorkflowReviewTaskGateway>());
         services.AddSingleton(Mock.Of<ISqlReviewAdjustmentService>());
@@ -54,6 +59,10 @@ public sealed class MafWorkflowFactoryTests
         services.AddSingleton(Mock.Of<IConfigRuleEngine>());
         services.AddSingleton(Mock.Of<IConfigReviewAdjustmentService>());
         services.AddSingleton(Mock.Of<IMafExecutorInstrumentation>());
+        services.AddSingleton(Mock.Of<IChatClientService>());
+        services.AddSingleton(Mock.Of<ILlmPromptManager>());
+        services.AddSingleton(Mock.Of<ILlmExecutionLogger>());
+        services.AddSingleton(Options.Create(new MafFeatureFlags()));
 
         // 注册 Logger
         services.AddLogging();

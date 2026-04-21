@@ -31,10 +31,20 @@
 | `result_type` | `varchar(100)` | `sql-optimization-report` / `db-config-optimization-report` |
 | `source_type` | `varchar(50)` | `manual` / `slow-query` |
 | `source_ref_id` | `uuid null` | 关联 slow query 等来源 |
+| `agent_session_ids` | `jsonb` | LLM / agent conversation ID 列表，用于会话聚合与排障 |
+| `total_tokens` | `int` | 当前 workflow 已累计的 LLM token 用量 |
+| `estimated_cost` | `numeric(12,4) null` | 当前 workflow 已累计的 LLM 估算成本 |
 | `error_message` | `text null` | 错误信息 |
 | `created_at` | `timestamptz` | 创建时间 |
 | `updated_at` | `timestamptz` | 更新时间 |
 | `completed_at` | `timestamptz null` | 完成时间 |
+
+### LLM 基础设施补充
+
+- `prompt_versions` 继续作为系统 Prompt 的唯一来源，当前由 `PromptVersionService` + `LlmPromptManager` 组合读取 active prompt。
+- `agent_executions` 继续保存单次 LLM 执行的输入、输出、状态和 token usage。
+- `agent_messages` 保存 system / user / assistant 三类消息，便于审计和后续回放。
+- `decision_records` 在 LLM 给出 reasoning / confidence / evidence 时保存结构化决策证据。
 
 ## 3. `review_tasks`
 

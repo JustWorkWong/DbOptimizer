@@ -221,6 +221,33 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
     }
 
     [Fact]
+    public async Task StartSqlAnalysisAsync_WhenWorkflowYieldsOutputAndEndsIdle_UpdatesSessionToCompleted()
+    {
+        var sessionId = Guid.NewGuid();
+        var command = new SqlAnalysisWorkflowCommand(
+            SessionId: sessionId,
+            SqlText: "SELECT 1",
+            DatabaseType: "mysql",
+            SchemaName: null,
+            RequireHumanReview: false);
+
+        _workflowFactoryMock.Setup(x => x.BuildSqlAnalysisWorkflow())
+            .Returns(CreateIdleOutputSqlWorkflow());
+
+        var response = await _runtime.StartSqlAnalysisAsync(command);
+
+        Assert.Equal("running", response.Status);
+
+        await WaitForSessionStatusAsync(sessionId, WorkflowSessionStatus.Completed, TimeSpan.FromSeconds(10));
+
+        await using var dbContext = new DbOptimizerDbContext(_dbOptions);
+        var session = await dbContext.WorkflowSessions.FindAsync(sessionId);
+        Assert.NotNull(session);
+        Assert.Equal(WorkflowSessionStatus.Completed, session!.Status);
+        Assert.NotNull(session.CompletedAt);
+    }
+
+    [Fact]
     public async Task StartSqlAnalysisAsync_WhenConcurrencyLimitReached_ThrowsWorkflowExecutionThrottledException()
     {
         var limitedGate = new WorkflowExecutionConcurrencyGate(
@@ -1009,6 +1036,15 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
             .Build();
     }
 
+    private static Workflow CreateIdleOutputSqlWorkflow()
+    {
+        var executor = new IdleOutputSqlExecutor();
+
+        return new WorkflowBuilder(executor)
+            .WithOutputFrom(executor)
+            .Build();
+    }
+
     private static WorkflowResultEnvelope CreateWorkflowEnvelope(string summary)
     {
         return new WorkflowResultEnvelope
@@ -1117,6 +1153,48 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
             }
 
             await Task.Delay(50, cancellationToken);
+        }
+    }
+
+    private async Task WaitForSessionStatusAsync(Guid sessionId, string expectedStatus, TimeSpan timeout)
+    {
+        using var cts = new CancellationTokenSource(timeout);
+
+        while (!cts.IsCancellationRequested)
+        {
+            await using var dbContext = new DbOptimizerDbContext(_dbOptions);
+            var session = await dbContext.WorkflowSessions.FindAsync([sessionId], cts.Token);
+            if (session?.Status == expectedStatus)
+            {
+                return;
+            }
+
+            await Task.Delay(100, cts.Token);
+        }
+
+        throw new TimeoutException($"Session {sessionId} did not reach status {expectedStatus} within {timeout}.");
+    }
+
+    [System.Obsolete]
+    private sealed class IdleOutputSqlExecutor :
+        ReflectingExecutor<IdleOutputSqlExecutor>,
+        IMessageHandler<DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlAnalysisWorkflowCommand>
+    {
+        public IdleOutputSqlExecutor()
+            : base("sql-idle-output")
+        {
+        }
+
+        public async ValueTask HandleAsync(
+            DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlAnalysisWorkflowCommand message,
+            IWorkflowContext context,
+            CancellationToken cancellationToken = default)
+        {
+            await context.YieldOutputAsync(
+                new DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlOptimizationCompletedMessage(
+                    message.SessionId,
+                    CreateWorkflowEnvelope("Completed without review")),
+                cancellationToken);
         }
     }
 }

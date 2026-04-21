@@ -45,7 +45,15 @@ public sealed class WorkflowApplicationServiceTests
         {
             SqlText = "SELECT * FROM users WHERE id = 1",
             DatabaseEngine = "mysql",
-            DatabaseId = "prod-db-01"
+            DatabaseId = "prod-db-01",
+            SourceType = "slow-query",
+            SourceRefId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            Options = new SqlAnalysisWorkflowOptions
+            {
+                EnableIndexRecommendation = false,
+                EnableSqlRewrite = true,
+                RequireHumanReview = false
+            }
         };
 
         var expectedResponse = new DbOptimizer.Infrastructure.Maf.Runtime.WorkflowStartResponse(
@@ -73,7 +81,13 @@ public sealed class WorkflowApplicationServiceTests
             x => x.StartSqlAnalysisAsync(
                 It.Is<SqlAnalysisWorkflowCommand>(cmd =>
                     cmd.SqlText == request.SqlText.Trim() &&
-                    cmd.DatabaseType == "mysql"),
+                    cmd.DatabaseType == "mysql" &&
+                    cmd.DatabaseId == request.DatabaseId &&
+                    cmd.SourceType == request.SourceType &&
+                    cmd.SourceRefId == request.SourceRefId &&
+                    !cmd.EnableIndexRecommendation &&
+                    cmd.EnableSqlRewrite &&
+                    !cmd.RequireHumanReview),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -162,7 +176,7 @@ public sealed class WorkflowApplicationServiceTests
                 It.Is<DbConfigWorkflowCommand>(cmd =>
                     cmd.DatabaseId == request.DatabaseId.Trim() &&
                     cmd.DatabaseType == "postgresql" &&
-                    cmd.AllowFallbackSnapshot == false &&
+                    cmd.AllowFallbackSnapshot &&
                     cmd.RequireHumanReview),
                 It.IsAny<CancellationToken>()),
             Times.Once);

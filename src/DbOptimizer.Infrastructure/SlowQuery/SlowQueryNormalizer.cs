@@ -2,7 +2,6 @@ using DbOptimizer.Core.Models;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
-using DbOptimizer.Core.Models;
 
 namespace DbOptimizer.Infrastructure.SlowQuery;
 
