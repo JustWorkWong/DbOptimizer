@@ -101,6 +101,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
         try
         {
             lease = _concurrencyGate.Acquire("sql_analysis");
+            var backgroundLease = lease;
             var start = await _sqlStarter.PrepareStartAsync(command, cancellationToken);
 
             RunInBackground(
@@ -112,7 +113,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                     }
                     finally
                     {
-                        lease.Dispose();
+                        backgroundLease.Dispose();
                     }
                 },
                 ex => _errorHandler.HandleWorkflowErrorAsync(
@@ -141,6 +142,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
         try
         {
             lease = _concurrencyGate.Acquire("db_config_optimization");
+            var backgroundLease = lease;
             var start = await _configStarter.PrepareStartAsync(command, cancellationToken);
 
             RunInBackground(
@@ -152,7 +154,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
                     }
                     finally
                     {
-                        lease.Dispose();
+                        backgroundLease.Dispose();
                     }
                 },
                 ex => _errorHandler.HandleWorkflowErrorAsync(
@@ -322,7 +324,7 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
 
         await UpdateSessionStatusAsync(sessionId, WorkflowSessionStatus.Running, cancellationToken);
 
-        await using var run = await InProcessExecution.ResumeAsync(
+        await using var run = await InProcessExecution.ResumeStreamingAsync(
             workflow,
             new CheckpointInfo(sessionId.ToString(), runState.CheckpointRef),
             _checkpointManager,
@@ -330,8 +332,25 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
 
         try
         {
-            await run.ResumeAsync([reviewResponse], cancellationToken);
-            var status = await run.GetStatusAsync(cancellationToken);
+            var emittedWorkflowOutput = false;
+            await run.RunToCompletionAsync(
+                evt =>
+                {
+                    if (evt is WorkflowOutputEvent)
+                    {
+                        emittedWorkflowOutput = true;
+                        return null;
+                    }
+
+                    return evt is RequestInfoEvent requestEvent
+                        ? RebindReviewResponse(session.WorkflowType, reviewResponse, requestEvent)
+                        : null;
+                },
+                cancellationToken);
+
+            var status = NormalizeResumeStatus(
+                await run.GetStatusAsync(cancellationToken),
+                emittedWorkflowOutput);
             await UpdateSessionAfterResumeAsync(sessionId, runState.RunId, status, null, cancellationToken);
             return new WorkflowResumeResponse(sessionId, MapResumeStatus(status));
         }
@@ -340,6 +359,53 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             await MarkSessionFailedAsync(sessionId, runState.RunId, ex, cancellationToken);
             throw;
         }
+    }
+
+    private ExternalResponse RebindReviewResponse(
+        string workflowType,
+        ExternalResponse originalResponse,
+        RequestInfoEvent requestEvent)
+    {
+        return workflowType switch
+        {
+            "sql_analysis" => RebindSqlReviewResponse(originalResponse, requestEvent),
+            "db_config_optimization" => RebindConfigReviewResponse(originalResponse, requestEvent),
+            _ => throw new InvalidOperationException($"Unknown workflow type: {workflowType}")
+        };
+    }
+
+    private static ExternalResponse RebindSqlReviewResponse(
+        ExternalResponse originalResponse,
+        RequestInfoEvent requestEvent)
+    {
+        if (!originalResponse.TryGetDataAs<SqlAnalysis.SqlReviewResponseMessage>(out var responseMessage))
+        {
+            throw new InvalidOperationException("Unable to deserialize SQL review response payload.");
+        }
+
+        if (!requestEvent.Request.TryGetDataAs<SqlAnalysis.SqlReviewRequestMessage>(out _))
+        {
+            throw new InvalidOperationException("Workflow did not emit the expected SQL review request while resuming.");
+        }
+
+        return requestEvent.Request.CreateResponse(responseMessage);
+    }
+
+    private static ExternalResponse RebindConfigReviewResponse(
+        ExternalResponse originalResponse,
+        RequestInfoEvent requestEvent)
+    {
+        if (!originalResponse.TryGetDataAs<DbConfig.ConfigReviewDecisionResponseMessage>(out var responseMessage))
+        {
+            throw new InvalidOperationException("Unable to deserialize DB config review response payload.");
+        }
+
+        if (!requestEvent.Request.TryGetDataAs<DbConfig.ConfigReviewRequestMessage>(out _))
+        {
+            throw new InvalidOperationException("Workflow did not emit the expected DB config review request while resuming.");
+        }
+
+        return requestEvent.Request.CreateResponse(responseMessage);
     }
 
     private async Task<(WorkflowSessionEntity Session, MafRunState RunState, Workflow Workflow)> LoadResumeContextAsync(
@@ -514,6 +580,13 @@ public sealed class MafWorkflowRuntime : IMafWorkflowRuntime
             RunStatus.PendingRequests or RunStatus.Idle => WorkflowSessionStatus.WaitingForReview,
             _ => "failed"
         };
+    }
+
+    private static RunStatus NormalizeResumeStatus(RunStatus status, bool emittedWorkflowOutput)
+    {
+        return status == RunStatus.Idle && emittedWorkflowOutput
+            ? RunStatus.Ended
+            : status;
     }
 
     private async Task<string?> TryGetCheckpointRefAsync(Guid sessionId, CancellationToken cancellationToken)

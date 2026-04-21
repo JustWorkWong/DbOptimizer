@@ -108,6 +108,7 @@ const loadingPromptVersions = ref(false)
 
 let eventSource: EventSource | null = null
 let replayTimer: number | null = null
+let workflowRefreshTimer: number | null = null
 
 const resultEnvelope = computed<WorkflowResultEnvelope | null>(() => {
   return workflow.value?.result ?? historyDetail.value?.result ?? selectedReview.value?.recommendations ?? null
@@ -242,7 +243,9 @@ watch(selectedTaskId, async (taskId) => {
 
 async function loadDashboard() {
   try {
-    stats.value = await getDashboardStats()
+    const nextStats = await getDashboardStats()
+    stats.value = nextStats
+    dashboardStats.value = nextStats
   } catch (error) {
     errorMessage.value = getErrorText(error)
   }
@@ -255,7 +258,7 @@ async function loadReviews(options?: { preserveWorkspace?: boolean }) {
     reviews.value = response.items
 
     if (response.items.length === 0) {
-      selectedTaskId.value = ''
+      clearReviewSelection()
       return
     }
 
@@ -271,7 +274,12 @@ async function loadReviews(options?: { preserveWorkspace?: boolean }) {
       selectedTaskId.value &&
       !response.items.some((item) => item.taskId === selectedTaskId.value)
     ) {
-      selectedTaskId.value = options?.preserveWorkspace ? '' : (response.items[0]?.taskId ?? '')
+      if (options?.preserveWorkspace) {
+        clearReviewSelection()
+        return
+      }
+
+      selectedTaskId.value = response.items[0]?.taskId ?? ''
     }
   } catch (error) {
     errorMessage.value = getErrorText(error)
@@ -341,6 +349,7 @@ async function loadDashboardWorkspace() {
       getSlowQueryTrends({ databaseId: dashboardDatabaseFilter.value || 'mysql-local', days: 7 }),
       getSlowQueryAlerts({ databaseId: dashboardDatabaseFilter.value || undefined, status: 'open' }),
     ])
+    stats.value = statsData
     dashboardStats.value = statsData
     slowQueryTrend.value = trendsData
     slowQueryAlerts.value = alertsData
@@ -672,7 +681,7 @@ function connectToWorkflowEvents(sessionId: string, loadId: number) {
   const source = createWorkflowEventSource(sessionId)
   eventSource = source
 
-  source.addEventListener('WorkflowEvent', (event) => {
+  const handleWorkflowEvent = (event: Event) => {
     if (
       activeSessionId.value !== sessionId ||
       loadId !== currentLoadId.value ||
@@ -681,11 +690,23 @@ function connectToWorkflowEvents(sessionId: string, loadId: number) {
     ) {
       return
     }
-    const data = JSON.parse((event as MessageEvent<string>).data) as WorkflowStreamEvent
+
+    const raw = JSON.parse((event as MessageEvent<string>).data) as unknown
+    const data = normalizeWorkflowStreamEvent(raw)
+    if (!data) {
+      return
+    }
+
     sseState.value = 'live'
     upsertReplayEvent(data)
-    void refreshWorkflow(sessionId, loadId, generation)
-  })
+    applyWorkflowEventToState(data)
+    if (shouldRefreshWorkflowFromEvent(data)) {
+      scheduleWorkflowRefresh(sessionId, loadId, generation)
+    }
+  }
+
+  source.addEventListener('workflow-event', handleWorkflowEvent)
+  source.addEventListener('WorkflowEvent', handleWorkflowEvent)
 
   source.addEventListener('snapshot', (event) => {
     if (
@@ -696,11 +717,13 @@ function connectToWorkflowEvents(sessionId: string, loadId: number) {
     ) {
       return
     }
-    const data = JSON.parse((event as MessageEvent<string>).data) as WorkflowStreamEvent
-    sseState.value = 'live'
-    if (data.payload) {
-      workflow.value = data.payload as unknown as WorkflowStatus
+    const raw = JSON.parse((event as MessageEvent<string>).data) as unknown
+    const data = normalizeWorkflowSnapshot(raw)
+    if (!data) {
+      return
     }
+    sseState.value = 'live'
+    applyWorkflowStatus(data)
   })
 
   source.addEventListener('heartbeat', () => {
@@ -730,8 +753,37 @@ function connectToWorkflowEvents(sessionId: string, loadId: number) {
 function closeEventSource() {
   eventSource?.close()
   eventSource = null
+  if (workflowRefreshTimer !== null) {
+    window.clearTimeout(workflowRefreshTimer)
+    workflowRefreshTimer = null
+  }
   streamGeneration.value += 1
   sseState.value = 'idle'
+}
+
+function shouldRefreshWorkflowFromEvent(event: WorkflowStreamEvent) {
+  return [
+    'WorkflowWaitingReview',
+    'WorkflowCompleted',
+    'WorkflowCancelled',
+    'WorkflowFailed',
+    'ExecutorFailed',
+  ].includes(event.eventType)
+}
+
+function scheduleWorkflowRefresh(
+  sessionId: string,
+  loadId = currentLoadId.value,
+  generation = streamGeneration.value,
+) {
+  if (workflowRefreshTimer !== null) {
+    window.clearTimeout(workflowRefreshTimer)
+  }
+
+  workflowRefreshTimer = window.setTimeout(() => {
+    workflowRefreshTimer = null
+    void refreshWorkflow(sessionId, loadId, generation)
+  }, 250)
 }
 
 async function refreshWorkflow(
@@ -760,7 +812,7 @@ async function refreshWorkflow(
     ) {
       return
     }
-    workflow.value = latestWorkflow
+    applyWorkflowStatus(latestWorkflow)
     historyDetail.value = latestHistory
   } catch {
     // Keep the last successful snapshot on transient failures.
@@ -798,17 +850,14 @@ async function handleSubmit() {
 
     await refreshWorkflow(sessionId, loadId, generation)
 
-    if (activeSessionId.value === sessionId) {
-      historyDetail.value = await getHistoryDetail(sessionId)
-    }
-
     await Promise.all([
       loadDashboard(),
       loadReviews({ preserveWorkspace: true }),
+      loadHistoryList(),
     ])
 
     if (activeSessionId.value === sessionId && !reviews.value.some((item) => item.taskId === taskId)) {
-      selectedTaskId.value = ''
+      clearReviewSelection()
     }
   } catch (error) {
     errorMessage.value = getErrorText(error)
@@ -835,6 +884,12 @@ function buildSubmitPayload(): SubmitReviewPayload {
 
 function selectReview(taskId: string) {
   selectedTaskId.value = taskId
+}
+
+function clearReviewSelection() {
+  selectedTaskId.value = ''
+  selectedReview.value = null
+  workspaceTaskId.value = ''
 }
 
 function resetReviewForm() {
@@ -967,6 +1022,114 @@ function getPayloadValue(payload: Record<string, unknown>, key: string) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeWorkflowEventType(eventType: string) {
+  switch (eventType) {
+    case 'workflow.started':
+      return 'WorkflowStarted'
+    case 'executor.started':
+      return 'ExecutorStarted'
+    case 'executor.completed':
+      return 'ExecutorCompleted'
+    case 'executor.failed':
+      return 'ExecutorFailed'
+    case 'review.requested':
+      return 'WorkflowWaitingReview'
+    case 'workflow.completed':
+      return 'WorkflowCompleted'
+    case 'workflow.failed':
+      return 'WorkflowFailed'
+    case 'workflow.cancelled':
+      return 'WorkflowCancelled'
+    case 'checkpoint.saved':
+      return 'CheckpointSaved'
+    default:
+      return eventType
+  }
+}
+
+function normalizeWorkflowStreamEvent(raw: unknown): WorkflowStreamEvent | null {
+  if (!isRecord(raw) || typeof raw.eventType !== 'string' || !isRecord(raw.payload)) {
+    return null
+  }
+
+  return {
+    sequence: typeof raw.sequence === 'number' ? raw.sequence : undefined,
+    eventType: normalizeWorkflowEventType(raw.eventType),
+    sessionId: typeof raw.sessionId === 'string' ? raw.sessionId : activeSessionId.value,
+    workflowType: typeof raw.workflowType === 'string' ? raw.workflowType : undefined,
+    timestamp: typeof raw.timestamp === 'string' ? raw.timestamp : new Date().toISOString(),
+    payload: raw.payload,
+  }
+}
+
+function normalizeWorkflowSnapshot(raw: unknown): WorkflowStatus | null {
+  if (!isRecord(raw) || typeof raw.sessionId !== 'string') {
+    return null
+  }
+
+  const review = isRecord(raw.review) ? raw.review : null
+  const error = isRecord(raw.error) ? raw.error : null
+
+  return {
+    sessionId: raw.sessionId,
+    workflowType: typeof raw.workflowType === 'string' ? raw.workflowType : '',
+    status: typeof raw.status === 'string' ? raw.status : 'Unknown',
+    currentExecutor: typeof raw.currentNode === 'string' ? raw.currentNode : null,
+    progress: typeof raw.progressPercent === 'number' ? raw.progressPercent : 0,
+    startedAt: typeof raw.startedAt === 'string' ? raw.startedAt : new Date().toISOString(),
+    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString(),
+    completedAt: typeof raw.completedAt === 'string' ? raw.completedAt : null,
+    result: isRecord(raw.result) ? (raw.result as unknown as WorkflowResultEnvelope) : null,
+    reviewId: review && typeof review.reviewId === 'string' ? review.reviewId : null,
+    reviewStatus: review && typeof review.status === 'string' ? review.status : null,
+    errorMessage: error && typeof error.message === 'string' ? error.message : null,
+  }
+}
+
+function applyWorkflowStatus(status: WorkflowStatus) {
+  workflow.value = status
+
+  if (dbConfigSessionId.value === status.sessionId) {
+    dbConfigWorkflowStatus.value = status
+  }
+}
+
+function applyWorkflowEventToState(event: WorkflowStreamEvent) {
+  if (!workflow.value || workflow.value.sessionId !== event.sessionId || !isRecord(event.payload)) {
+    return
+  }
+
+  const nextExecutor = typeof event.payload.executorName === 'string'
+    ? event.payload.executorName
+    : workflow.value.currentExecutor
+  const nextProgress = typeof event.payload.progressPercent === 'number'
+    ? event.payload.progressPercent
+    : workflow.value.progress
+
+  const nextStatus = (() => {
+    switch (event.eventType) {
+      case 'WorkflowCompleted':
+        return 'Completed'
+      case 'WorkflowFailed':
+        return 'Failed'
+      case 'WorkflowCancelled':
+        return 'Cancelled'
+      case 'WorkflowWaitingReview':
+        return 'WaitingForReview'
+      default:
+        return workflow.value?.status ?? 'Running'
+    }
+  })()
+
+  applyWorkflowStatus({
+    ...workflow.value,
+    status: nextStatus,
+    currentExecutor: event.eventType === 'WorkflowWaitingReview' ? null : nextExecutor,
+    progress: nextProgress,
+    updatedAt: event.timestamp,
+  })
 }
 
 function normalizeTokenUsage(value: Record<string, unknown>) {
@@ -1625,10 +1788,10 @@ function getErrorText(error: unknown) {
             <section class="info-block">
               <div class="block-head">
                 <h3>索引建议</h3>
-                <span>{{ report?.indexRecommendations.length ?? 0 }} 条</span>
+                <span>{{ report?.indexRecommendations?.length ?? 0 }} 条</span>
               </div>
 
-              <div v-if="!report?.indexRecommendations.length" class="empty-inline">当前没有索引建议。</div>
+              <div v-if="!report?.indexRecommendations?.length" class="empty-inline">当前没有索引建议。</div>
 
               <article
                 v-for="recommendation in report?.indexRecommendations"
@@ -1652,10 +1815,10 @@ function getErrorText(error: unknown) {
             <section class="info-block">
               <div class="block-head">
                 <h3>证据链</h3>
-                <span>{{ report?.evidenceChain.length ?? 0 }} 条</span>
+                <span>{{ report?.evidenceChain?.length ?? 0 }} 条</span>
               </div>
 
-              <div v-if="!report?.evidenceChain.length" class="empty-inline">当前没有证据链数据。</div>
+              <div v-if="!report?.evidenceChain?.length" class="empty-inline">当前没有证据链数据。</div>
 
               <div v-else class="evidence-list">
                 <article v-for="evidence in report?.evidenceChain" :key="`${evidence.sourceType}-${evidence.reference}`" class="evidence-card">

@@ -250,7 +250,7 @@ public sealed class ReviewApplicationServiceTests
                     taskId,
                     action,
                     comment,
-                    adjustments,
+                    new Dictionary<string, JsonElement>(adjustments),
                     DateTimeOffset.UtcNow));
         }
 

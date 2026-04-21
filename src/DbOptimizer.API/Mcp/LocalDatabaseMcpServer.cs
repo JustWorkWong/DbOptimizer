@@ -123,8 +123,8 @@ internal sealed class LocalDatabaseMcpTools(LocalDatabaseMcpContext context)
     public Task<string> explain([Description("SQL query text.")] string sql)
         => context.Engine switch
         {
-            LocalDatabaseEngine.MySql => ExecuteQueryAsync($"EXPLAIN {sql}", allowExplainPrefix: true),
-            LocalDatabaseEngine.PostgreSql => ExecuteQueryAsync($"EXPLAIN (FORMAT JSON) {sql}", allowExplainPrefix: true),
+            LocalDatabaseEngine.MySql => ExecuteExplainAsync($"EXPLAIN {sql}"),
+            LocalDatabaseEngine.PostgreSql => ExecuteExplainAsync($"EXPLAIN (FORMAT JSON) {sql}"),
             _ => throw new InvalidOperationException($"Unsupported database engine: {context.Engine}")
         };
 
@@ -170,6 +170,30 @@ internal sealed class LocalDatabaseMcpTools(LocalDatabaseMcpContext context)
         }
 
         return await ExecuteReaderAsync(sql, _ => { });
+    }
+
+    private async Task<string> ExecuteExplainAsync(string sql)
+    {
+        try
+        {
+            var plan = await ExecuteQueryAsync(sql, allowExplainPrefix: true);
+            using var document = JsonDocument.Parse(plan);
+
+            return JsonSerializer.Serialize(new
+            {
+                ok = true,
+                plan = document.RootElement.Clone()
+            });
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                error = ex.Message,
+                exceptionType = ex.GetType().Name
+            });
+        }
     }
 
     private async Task<string> CollectMySqlConfigAsync()

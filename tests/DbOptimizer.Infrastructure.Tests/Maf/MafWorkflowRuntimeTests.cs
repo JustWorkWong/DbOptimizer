@@ -2,10 +2,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using System.Text.Json;
+using DbOptimizer.Core.Models;
 using DbOptimizer.Infrastructure.Maf.Runtime;
 using DbOptimizer.Infrastructure.Persistence;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Agents.AI.Workflows.Checkpointing;
+using Microsoft.Agents.AI.Workflows.Reflection;
 using DbOptimizer.Infrastructure.Workflows;
 
 namespace DbOptimizer.Infrastructure.Tests.Maf;
@@ -444,6 +447,64 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
     }
 
     [Fact]
+    public async Task ResumeSqlWorkflowAsync_WhenWorkflowEmitsOutputAndRunEndsIdle_UpdatesSessionToCompleted()
+    {
+        var sessionId = Guid.NewGuid();
+        var workflow = CreateBidirectionalSqlReviewWorkflow();
+        var runState = await SeedPendingCheckpointAsync(
+            sessionId,
+            workflow,
+            new DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlOptimizationDraftReadyMessage(
+                sessionId,
+                CreateWorkflowEnvelope("Draft result")));
+
+        await using (var dbContext = new DbOptimizerDbContext(_dbOptions))
+        {
+            dbContext.WorkflowSessions.Add(new WorkflowSessionEntity
+            {
+                SessionId = sessionId,
+                WorkflowType = "sql_analysis",
+                Status = WorkflowSessionStatus.WaitingForReview,
+                State = "{}",
+                EngineType = "maf",
+                EngineRunId = runState.RunId,
+                EngineCheckpointRef = runState.CheckpointRef,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            });
+            await dbContext.SaveChangesAsync();
+        }
+
+        _workflowFactoryMock.Setup(x => x.BuildSqlAnalysisWorkflow())
+            .Returns(workflow);
+
+        var response = await _runtime.ResumeSqlWorkflowAsync(
+            sessionId,
+            ExternalRequest.Create(
+                    MafReviewPorts.SqlReview,
+                    new DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlReviewRequestMessage(
+                        sessionId,
+                        Guid.NewGuid(),
+                        CreateWorkflowEnvelope("Draft result")),
+                    Guid.NewGuid().ToString("N"))
+                .CreateResponse(new DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlReviewResponseMessage(
+                    sessionId,
+                    Guid.NewGuid(),
+                    "approve",
+                    "approved",
+                    new Dictionary<string, JsonElement>(),
+                    DateTimeOffset.UtcNow)));
+
+        Assert.Equal("completed", response.Status);
+
+        await using var verifyContext = new DbOptimizerDbContext(_dbOptions);
+        var updatedSession = await verifyContext.WorkflowSessions.FindAsync(sessionId);
+        Assert.NotNull(updatedSession);
+        Assert.Equal(WorkflowSessionStatus.Completed, updatedSession!.Status);
+        Assert.NotNull(updatedSession.CompletedAt);
+    }
+
+    [Fact]
     public async Task ResumeAsync_WithNonExistentSession_ThrowsException()
     {
         // Arrange
@@ -868,7 +929,8 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
             .Build();
     }
 
-    private async Task<MafRunState> SeedPendingCheckpointAsync(Guid sessionId, Workflow workflow, string requestPayload)
+    private async Task<MafRunState> SeedPendingCheckpointAsync<TInput>(Guid sessionId, Workflow workflow, TInput requestPayload)
+        where TInput : notnull
     {
         MafRunState? state = null;
 
@@ -936,6 +998,29 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
             .Build();
     }
 
+    private static Workflow CreateBidirectionalSqlReviewWorkflow()
+    {
+        var executor = new BidirectionalSqlReviewExecutor();
+
+        return new WorkflowBuilder(executor)
+            .AddEdge(executor, MafReviewPorts.SqlReview)
+            .AddEdge(MafReviewPorts.SqlReview, executor)
+            .WithOutputFrom(executor)
+            .Build();
+    }
+
+    private static WorkflowResultEnvelope CreateWorkflowEnvelope(string summary)
+    {
+        return new WorkflowResultEnvelope
+        {
+            ResultType = "sql_optimization",
+            DisplayName = "SQL Optimization Result",
+            Summary = summary,
+            Data = JsonSerializer.SerializeToElement(new { summary }),
+            Metadata = JsonSerializer.SerializeToElement(new { requireHumanReview = true })
+        };
+    }
+
     private sealed class SqlNoOpExecutor : Executor<DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlAnalysisWorkflowCommand, string>
     {
         public SqlNoOpExecutor()
@@ -981,6 +1066,43 @@ public sealed class MafWorkflowRuntimeTests : IDisposable
             CancellationToken cancellationToken = default)
         {
             return ValueTask.FromResult(message ? "approved" : "rejected");
+        }
+    }
+
+    [System.Obsolete]
+    [SendsMessage(typeof(DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlReviewRequestMessage))]
+    private sealed class BidirectionalSqlReviewExecutor :
+        ReflectingExecutor<BidirectionalSqlReviewExecutor>,
+        IMessageHandler<DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlOptimizationDraftReadyMessage>,
+        IMessageHandler<DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlReviewResponseMessage, DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlOptimizationCompletedMessage>
+    {
+        public BidirectionalSqlReviewExecutor()
+            : base("sql-review")
+        {
+        }
+
+        public async ValueTask HandleAsync(
+            DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlOptimizationDraftReadyMessage message,
+            IWorkflowContext context,
+            CancellationToken cancellationToken = default)
+        {
+            await context.SendMessageAsync(
+                new DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlReviewRequestMessage(
+                    message.SessionId,
+                    Guid.NewGuid(),
+                    message.DraftResult),
+                cancellationToken);
+        }
+
+        public ValueTask<DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlOptimizationCompletedMessage> HandleAsync(
+            DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlReviewResponseMessage message,
+            IWorkflowContext context,
+            CancellationToken cancellationToken = default)
+        {
+            return ValueTask.FromResult(
+                new DbOptimizer.Infrastructure.Maf.SqlAnalysis.SqlOptimizationCompletedMessage(
+                    message.SessionId,
+                    CreateWorkflowEnvelope("Approved result")));
         }
     }
 
