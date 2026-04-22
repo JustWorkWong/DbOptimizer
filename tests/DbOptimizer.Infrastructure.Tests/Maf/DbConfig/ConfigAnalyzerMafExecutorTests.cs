@@ -40,7 +40,8 @@ public sealed class ConfigAnalyzerMafExecutorTests
                 It.Is<LlmRequestOptions>(options =>
                     options.ConversationId != null &&
                     options.Timeout == TimeSpan.FromSeconds(120) &&
-                    options.MaxRetries == 2),
+                    options.MaxRetries == 2 &&
+                    options.UseStreaming == false),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new LlmStructuredResponse<ConfigAnalyzerLlmResponse>(
                 new ConfigAnalyzerLlmResponse
