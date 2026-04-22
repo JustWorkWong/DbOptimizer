@@ -59,7 +59,8 @@ public sealed class IndexAdvisorMafExecutorTests
                 It.Is<LlmRequestOptions>(options =>
                     options.ConversationId != null &&
                     options.Timeout == TimeSpan.FromSeconds(90) &&
-                    options.MaxRetries == 2),
+                    options.MaxRetries == 2 &&
+                    options.UseStreaming == false),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new LlmStructuredResponse<IndexAdvisorLlmResponse>(
                 new IndexAdvisorLlmResponse

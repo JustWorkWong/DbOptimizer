@@ -93,7 +93,8 @@ public sealed class SqlRewriteMafExecutor(
                 {
                     ConversationId = conversationId,
                     Timeout = TimeSpan.FromSeconds(90),
-                    MaxRetries = 2
+                    MaxRetries = 2,
+                    UseStreaming = _featureFlags.EnableLlmStreaming
                 },
                 cancellationToken);
 

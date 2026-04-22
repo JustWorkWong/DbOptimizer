@@ -83,7 +83,8 @@ public sealed class ConfigAnalyzerMafExecutor(
                 {
                     ConversationId = conversationId,
                     Timeout = TimeSpan.FromSeconds(120),
-                    MaxRetries = 2
+                    MaxRetries = 2,
+                    UseStreaming = _featureFlags.EnableLlmStreaming
                 },
                 cancellationToken);
 

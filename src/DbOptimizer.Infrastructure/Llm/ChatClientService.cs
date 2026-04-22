@@ -44,6 +44,8 @@ public sealed class LlmRequestOptions
     public bool? UseJsonSchemaResponseFormat { get; set; }
 
     public string? ConversationId { get; set; }
+
+    public bool? UseStreaming { get; set; }
 }
 
 public sealed record LlmTokenUsage(
@@ -255,7 +257,51 @@ public sealed class ChatClientService(
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(ResolveTimeout(options));
 
+        if (UseStreaming(options))
+        {
+            return await SendStreamingAsync(messages, chatOptions, options, timeoutCts.Token);
+        }
+
         return await _chatClient.GetResponseAsync(messages, chatOptions, timeoutCts.Token);
+    }
+
+    private async Task<ChatResponse> SendStreamingAsync(
+        IReadOnlyList<ChatMessage> messages,
+        ChatOptions chatOptions,
+        LlmRequestOptions? options,
+        CancellationToken cancellationToken)
+    {
+        var updates = new List<ChatResponseUpdate>();
+        var chunkCount = 0;
+        var firstChunkAtMs = -1L;
+        var stopwatch = Stopwatch.StartNew();
+
+        await foreach (var update in _chatClient.GetStreamingResponseAsync(messages, chatOptions, cancellationToken))
+        {
+            updates.Add(update);
+            chunkCount++;
+
+            if (firstChunkAtMs < 0)
+            {
+                firstChunkAtMs = stopwatch.ElapsedMilliseconds;
+                _logger.LogInformation(
+                    "Received first LLM streaming chunk. Provider={Provider}, Model={ModelId}, ConversationId={ConversationId}, FirstChunkAtMs={FirstChunkAtMs}",
+                    _providerOptions.Provider,
+                    ResolveModelId(options),
+                    options?.ConversationId ?? string.Empty,
+                    firstChunkAtMs);
+            }
+        }
+
+        _logger.LogInformation(
+            "LLM streaming completed. Provider={Provider}, Model={ModelId}, ConversationId={ConversationId}, ChunkCount={ChunkCount}, DurationMs={DurationMs}",
+            _providerOptions.Provider,
+            ResolveModelId(options),
+            options?.ConversationId ?? string.Empty,
+            chunkCount,
+            stopwatch.ElapsedMilliseconds);
+
+        return await EnumerateUpdatesAsync(updates, cancellationToken).ToChatResponseAsync(cancellationToken);
     }
 
     private static IReadOnlyList<ChatMessage> BuildMessages(string systemPrompt, string userPrompt)
@@ -308,6 +354,23 @@ public sealed class ChatClientService(
     private string ResolveModelId(LlmRequestOptions? options)
     {
         return string.IsNullOrWhiteSpace(options?.ModelId) ? _providerOptions.Model : options.ModelId;
+    }
+
+    private static bool UseStreaming(LlmRequestOptions? options)
+    {
+        return options?.UseStreaming ?? false;
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> EnumerateUpdatesAsync(
+        IReadOnlyList<ChatResponseUpdate> updates,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (var update in updates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return update;
+            await Task.Yield();
+        }
     }
 
     private static LlmTokenUsage ExtractUsage(ChatResponse response)
